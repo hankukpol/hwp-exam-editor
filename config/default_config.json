@@ -1,0 +1,88 @@
+{
+  "format": {
+    "question_font": "중고딕",
+    "passage_font": "휴먼명조",
+    "font_size": 9.5,
+    "relative_size": 100,
+    "char_width": 95,
+    "char_spacing": -5,
+    "char_position": 0,
+    "columns": 2
+  },
+  "paragraph": {
+    "alignment": "justify",
+    "left_margin": 0.0,
+    "right_margin": 0.0,
+    "indent_type": "hanging",
+    "indent_value": 13.8,
+    "line_spacing_type": "percent_by_char",
+    "line_spacing": 140,
+    "space_before": 0.0,
+    "space_after": 0.0,
+    "use_grid": true
+  },
+  "page": {
+    "paper_type": "A4",
+    "orientation": "portrait",
+    "binding": "left",
+    "top_margin": 15.0,
+    "bottom_margin": 10.0,
+    "left_margin": 15.0,
+    "right_margin": 15.0,
+    "header_height": 0.0,
+    "footer_height": 5.0,
+    "gutter": 0.0
+  },
+  "parsing": {
+    "question_patterns": [
+      "^\\s*(\\d{1,2})\\s*[\\.\\)]\\s*",
+      "^\\s*(0\\d)\\s*[\\.\\)]\\s*",
+      "^\\s*【\\s*(\\d{1,2})\\s*】\\s*",
+      "^\\s*문\\s*(\\d{1,2})\\s*[\\.\\)]\\s*"
+    ],
+    "answer_patterns": [
+      "^\\s*정답\\s+[①②③④⑤]",
+      "^\\s*정답[①②③④⑤]",
+      "^\\s*정답\\s*[:：]\\s*[①②③④⑤]",
+      "^\\s*정답\\s*[:：]\\s*\\d"
+    ],
+    "explanation_patterns": [
+      "^\\s*해설\\s*[\\[【]?[×○xo]?[\\]】]?",
+      "^\\s*해설\\s*[:：]",
+      "^\\s*[①②③④⑤]\\s*[:：]?\\s*[\\[\\(]?[×○xo][\\]\\)]?",
+      "^\\s*★\\s*관련\\s*판례"
+    ],
+    "type_a_threshold": 5
+  },
+  "negative_keywords": [
+    "옳지 않은",
+    "옳지않은",
+    "틀린",
+    "적절하지 않은",
+    "적절하지않은",
+    "올바르지 아니한",
+    "올바르지아니한",
+    "올바르지 않은",
+    "올바르지않은",
+    "가장 적절하지 않은",
+    "가장 옳지 않은",
+    "잘못된",
+    "부적절한",
+    "아닌 것",
+    "않은 것"
+  ],
+  "paths": {
+    "output_directory": ""
+  },
+  "style": {
+    "enabled": true,
+    "template_path": "",
+    "style_map_source": "",
+    "module_dll_path": "",
+    "question_style": "문제",
+    "passage_style": "지문",
+    "choice_style": "지문",
+    "sub_items_style": "지문",
+    "explanation_style": "지문"
+  }
+}

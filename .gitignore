@@ -1,0 +1,18 @@
+# Python cache / test cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local runtime artifacts
+.runtime_tmp/
+dbg_gen_*/
+.claude/
+
+# Local environment folders
+.venv/
+venv/
+
+# Generated outputs
+output/
+output/_*
+output/*.log

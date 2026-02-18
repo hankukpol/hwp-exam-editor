@@ -1,0 +1,194 @@
+from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QListWidget, 
+                             QListWidgetItem, QTextEdit, QLabel, QPushButton, 
+                             QSplitter, QFrame, QMessageBox)
+from PyQt5.QtCore import Qt
+
+from core.models import ExamDocument
+
+
+class PreviewWindow(QDialog):
+    def __init__(self, exam_document: ExamDocument, parent=None):
+        super().__init__(parent)
+        self.exam_document = exam_document
+        self.current_index = -1
+
+        self.setWindowTitle("파싱 결과 미리보기 및 보정")
+        self.resize(1000, 700)
+        self.initUI()
+        self.bindEvents()
+        self.loadQuestions()
+
+    def initUI(self):
+        main_layout = QVBoxLayout(self)
+        
+        # 안내 문구
+        header_label = QLabel("왼쪽 목록에서 문제를 선택하여 내용을 확인하고 수정할 수 있습니다.")
+        header_label.setStyleSheet("font-weight: bold; color: #333; margin-bottom: 10px;")
+        main_layout.addWidget(header_label)
+
+        # 스플리터 (좌: 목록, 우: 상세편집)
+        splitter = QSplitter(Qt.Horizontal)
+        
+        # 좌측 리스트
+        self.list_widget = QListWidget()
+        self.list_widget.setObjectName("QuestionList")
+        splitter.addWidget(self.list_widget)
+        
+        # 우측 상세 영역
+        detail_container = QFrame()
+        detail_layout = QVBoxLayout(detail_container)
+        
+        detail_layout.addWidget(QLabel("문제 및 지문 영역:"))
+        self.question_edit = QTextEdit()
+        detail_layout.addWidget(self.question_edit)
+        
+        detail_layout.addWidget(QLabel("정답:"))
+        self.answer_edit = QTextEdit()
+        self.answer_edit.setMaximumHeight(50)
+        detail_layout.addWidget(self.answer_edit)
+        
+        detail_layout.addWidget(QLabel("해설 영역:"))
+        self.explanation_edit = QTextEdit()
+        detail_layout.addWidget(self.explanation_edit)
+        
+        splitter.addWidget(detail_container)
+        splitter.setStretchFactor(1, 1) # 우측 영역이 더 넓게
+        
+        main_layout.addWidget(splitter)
+        
+        # 하단 제어 버튼
+        btn_layout = QHBoxLayout()
+        self.save_btn = QPushButton("변경사항 저장")
+        self.convert_btn = QPushButton("선택한 설정으로 변환 시작")
+        self.convert_btn.setObjectName("PrimaryBtn")
+        self.close_btn = QPushButton("닫기")
+        
+        btn_layout.addStretch()
+        btn_layout.addWidget(self.save_btn)
+        btn_layout.addWidget(self.convert_btn)
+        btn_layout.addWidget(self.close_btn)
+        
+        main_layout.addLayout(btn_layout)
+        
+        self.applyStyle()
+
+    def bindEvents(self):
+        self.list_widget.currentRowChanged.connect(self.onQuestionSelected)
+        self.save_btn.clicked.connect(self.saveCurrentQuestion)
+        self.convert_btn.clicked.connect(self.convertAndClose)
+        self.close_btn.clicked.connect(self.reject)
+
+    def loadQuestions(self):
+        self.list_widget.clear()
+        for question in self.exam_document.questions:
+            status = "✅"
+            if self.exam_document.file_type == "TYPE_A" and not question.answer:
+                status = "❌"
+            elif self.exam_document.file_type == "TYPE_A" and not question.explanation:
+                status = "⚠️"
+
+            preview_line = question.question_text.splitlines()[0] if question.question_text else "(본문 없음)"
+            item_text = f"{status} {question.number:02d}. {preview_line}"
+            self.list_widget.addItem(QListWidgetItem(item_text))
+
+        if self.exam_document.questions:
+            self.list_widget.setCurrentRow(0)
+
+    def onQuestionSelected(self, index: int):
+        self.current_index = index
+        if index < 0 or index >= len(self.exam_document.questions):
+            self.question_edit.clear()
+            self.answer_edit.clear()
+            self.explanation_edit.clear()
+            return
+
+        question = self.exam_document.questions[index]
+        body_parts = [question.question_text]
+        if question.sub_items:
+            body_parts.append("\n".join(question.sub_items))
+        if question.choices:
+            body_parts.append("\n".join(question.choices))
+
+        self.question_edit.setPlainText("\n".join(part for part in body_parts if part))
+        self.answer_edit.setPlainText(question.answer or "")
+        self.explanation_edit.setPlainText(question.explanation or "")
+
+    def saveCurrentQuestion(self, show_message: bool = True):
+        index = self.current_index
+        if index < 0 or index >= len(self.exam_document.questions):
+            return
+
+        question = self.exam_document.questions[index]
+        edited_lines = [
+            line.rstrip()
+            for line in self.question_edit.toPlainText().splitlines()
+            if line.strip()
+        ]
+
+        choices: list[str] = []
+        sub_items: list[str] = []
+        body: list[str] = []
+        for line in edited_lines:
+            stripped = line.strip()
+            if stripped[:1] in {"①", "②", "③", "④", "⑤"}:
+                choices.append(stripped)
+            elif stripped[:1] in {"㉠", "㉡", "㉢", "㉣", "㉤", "㉥"}:
+                sub_items.append(stripped)
+            else:
+                body.append(stripped)
+
+        question.question_text = "\n".join(body).strip()
+        question.choices = choices
+        question.sub_items = sub_items
+        question.answer = self.answer_edit.toPlainText().strip() or None
+        question.explanation = self.explanation_edit.toPlainText().strip() or None
+
+        self.loadQuestions()
+        self.list_widget.setCurrentRow(index)
+        if show_message:
+            QMessageBox.information(self, "저장 완료", "현재 문항 변경사항을 저장했습니다.")
+
+    def convertAndClose(self):
+        self.saveCurrentQuestion(show_message=False)
+        self.accept()
+
+    def applyStyle(self):
+        style = """
+            QDialog {
+                background-color: #f5f5f5;
+            }
+            QListWidget {
+                background-color: white;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+            }
+            QListWidget::item {
+                padding: 10px;
+                border-bottom: 1px solid #eee;
+            }
+            QListWidget::item:selected {
+                background-color: #e3f2fd;
+                color: #1a237e;
+            }
+            QTextEdit {
+                background-color: white;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                font-family: 'Malgun Gothic';
+                font-size: 13px;
+            }
+            QLabel {
+                font-weight: bold;
+                margin-top: 5px;
+            }
+            QPushButton {
+                padding: 8px 16px;
+                border-radius: 4px;
+                background-color: #e0e0e0;
+            }
+            #PrimaryBtn {
+                background-color: #1a237e;
+                color: white;
+            }
+        """
+        self.setStyleSheet(style)
