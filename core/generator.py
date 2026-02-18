@@ -813,8 +813,7 @@ class OutputGenerator:
             if not question.sub_items or self.formatter.choice_style != self.formatter.sub_items_style:
                 self._heartbeat(f"문제 {question.number}: 선지 스타일")
                 self.formatter.apply_choice_format(hwp)
-            for choice in question.choices:
-                choice_text = self._normalize_inline_choice_spacing(choice)
+            for choice_text in self._build_choice_lines(question.choices):
                 self._insert_text(hwp, f"{choice_text}\r\n")
 
         self._insert_text(hwp, "\r\n")
@@ -900,7 +899,7 @@ class OutputGenerator:
         marker_pattern = re.compile(r"[①②③④⑤]")
         matches = list(marker_pattern.finditer(text))
         if len(matches) < 2:
-            return text
+            return self._strip_choice_noise_suffix(text)
 
         parts: list[str] = []
         for index, match in enumerate(matches):
@@ -910,10 +909,72 @@ class OutputGenerator:
             if not part:
                 continue
             part = re.sub(r"\s+", " ", part)
+            part = self._strip_choice_noise_suffix(part)
             parts.append(part)
         if len(parts) < 2:
-            return text
+            return self._strip_choice_noise_suffix(text)
         return (" " * 9).join(parts)
+
+    @staticmethod
+    def _strip_choice_noise_suffix(text: str) -> str:
+        normalized = re.sub(r"\s+", " ", (text or "").strip())
+        if not normalized:
+            return ""
+
+        # OLE 추출 노이즈가 선지 끝에 1글자로 끼는 케이스를 제거한다.
+        # 예: U+3C72, U+2C86, U+4546
+        def _is_noise_char(ch: str) -> bool:
+            code = ord(ch)
+            return (
+                0x0370 <= code <= 0x03FF  # Greek
+                or 0x2C80 <= code <= 0x2CFF  # Coptic
+                or 0x3400 <= code <= 0x4DBF  # CJK Extension A
+            )
+
+        if normalized and _is_noise_char(normalized[-1]):
+            normalized = normalized[:-1].rstrip()
+        return normalized
+
+    def _build_choice_lines(self, choices: list[str]) -> list[str]:
+        lines = [
+            self._normalize_inline_choice_spacing(choice)
+            for choice in choices
+            if (choice or "").strip()
+        ]
+        if self._can_compact_choice_lines(lines):
+            normalized = [re.sub(r"\s+", " ", line.strip()) for line in lines]
+            return [(" " * 9).join(normalized)]
+        return lines
+
+    @staticmethod
+    def _can_compact_choice_lines(lines: list[str]) -> bool:
+        if len(lines) < 2:
+            return False
+        marker_line = re.compile(r"^[①②③④⑤]\s*")
+        marker_any = re.compile(r"[①②③④⑤]")
+
+        normalized: list[str] = []
+        payload_lengths: list[int] = []
+        for line in lines:
+            text = re.sub(r"\s+", " ", (line or "").strip())
+            if not text:
+                return False
+            if len(marker_any.findall(text)) != 1:
+                return False
+            if not marker_line.match(text):
+                return False
+            body = marker_line.sub("", text, count=1).strip()
+            if not body:
+                return False
+            normalized.append(text)
+            payload_lengths.append(len(body))
+
+        if not payload_lengths:
+            return False
+        if max(payload_lengths) > 20:
+            return False
+        total = sum(len(text) for text in normalized) + (len(normalized) - 1) * 9
+        return total <= 110
 
     def _should_use_sub_items_table(self, sub_items: list[str], prefer_table: bool = False) -> bool:
         if not self._use_sub_items_table:

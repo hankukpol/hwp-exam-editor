@@ -115,6 +115,63 @@ class GeneratorSubItemsTablePolicyTestCase(unittest.TestCase):
         )
         self.assertEqual(generator._normalize_inline_choice_spacing(source), expected)
 
+    def test_separate_short_choices_are_compacted_with_nine_spaces(self) -> None:
+        generator = _make_generator(True)
+        source = ["\u2460 1개", "\u2461 2개", "\u2462 3개", "\u2463 4개"]
+        expected = (
+            "\u2460 1개"
+            + (" " * 9)
+            + "\u2461 2개"
+            + (" " * 9)
+            + "\u2462 3개"
+            + (" " * 9)
+            + "\u2463 4개"
+        )
+        self.assertEqual(generator._build_choice_lines(source), [expected])
+
+    def test_separate_long_choices_are_not_compacted(self) -> None:
+        generator = _make_generator(True)
+        source = [
+            "\u2460 ㄱ, ㄴ, ㄷ 중에서 옳은 설명을 고르시오",
+            "\u2461 ㄱ, ㄴ, ㄹ 중에서 옳은 설명을 고르시오",
+            "\u2462 ㄴ, ㄷ, ㄹ 중에서 옳은 설명을 고르시오",
+            "\u2463 ㄱ, ㄷ, ㄹ 중에서 옳은 설명을 고르시오",
+        ]
+        lines = generator._build_choice_lines(source)
+        self.assertEqual(len(lines), 4)
+        self.assertEqual(lines[0], source[0])
+
+    def test_separate_short_kiueuk_choices_are_compacted(self) -> None:
+        generator = _make_generator(True)
+        source = ["\u2460 ㄱ,ㄴ", "\u2461 ㄴ,ㄷ", "\u2462 ㄱ,ㄷ", "\u2463 ㄱ,ㄴ,ㄷ"]
+        expected = (
+            "\u2460 ㄱ,ㄴ"
+            + (" " * 9)
+            + "\u2461 ㄴ,ㄷ"
+            + (" " * 9)
+            + "\u2462 ㄱ,ㄷ"
+            + (" " * 9)
+            + "\u2463 ㄱ,ㄴ,ㄷ"
+        )
+        self.assertEqual(generator._build_choice_lines(source), [expected])
+
+
+    def test_inline_choice_spacing_strips_extraction_noise_suffix(self) -> None:
+        generator = _make_generator(True)
+        source = "\u2460 \uccad\uad6c\uc2dc\uae30 \u3c72 \u2461 \uccad\uad6c\uad8c\uc790"
+        expected = (
+            "\u2460 \uccad\uad6c\uc2dc\uae30"
+            + (" " * 9)
+            + "\u2461 \uccad\uad6c\uad8c\uc790"
+        )
+        self.assertEqual(generator._normalize_inline_choice_spacing(source), expected)
+
+    def test_inline_choice_spacing_strips_noise_in_count_choices(self) -> None:
+        generator = _make_generator(True)
+        source = "\u2460 0\uac1c \u4546 \u2461 1\uac1c"
+        expected = "\u2460 0\uac1c" + (" " * 9) + "\u2461 1\uac1c"
+        self.assertEqual(generator._normalize_inline_choice_spacing(source), expected)
+
 
 if __name__ == "__main__":
     unittest.main()
