@@ -1,0 +1,22 @@
+{
+  "preset_name": "정기모의고사",
+  "preset_description": "",
+  "format": {
+    "question_font": "중고딕",
+    "passage_font": "신명조",
+    "font_size": 13.0,
+    "question_font_size": 13.0,
+    "passage_font_size": 12.0,
+    "char_width": 95,
+    "char_spacing": -5
+  },
+  "paragraph": {
+    "line_spacing": 115,
+    "indent_value": 12.0
+  },
+  "style": {
+    "template_path": "D:/앱 프로그램/아침모의고사 자동편집 프로그램/config/templates/정기모의고사 템플릿.hwp",
+    "question_style": "문제",
+    "passage_style": "지문"
+  }
+}

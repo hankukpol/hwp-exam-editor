@@ -1,4 +1,6 @@
 import json
+import re
+from pathlib import Path
 
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                              QLineEdit, QPushButton, QFormLayout, QGroupBox,
@@ -53,12 +55,19 @@ class SettingsWindow(QDialog):
         self.p_font_combo.addItems(["휴먼명조", "HY신명조", "바탕", "함초롬바탕"])
         font_form.addRow("지문 폰트:", self.p_font_combo)
 
-        self.size_spin = QDoubleSpinBox()
-        self.size_spin.setRange(6.0, 20.0)
-        self.size_spin.setSingleStep(0.5)
-        self.size_spin.setValue(9.5)
-        self.size_spin.setSuffix(" pt")
-        font_form.addRow("글자 크기:", self.size_spin)
+        self.q_size_spin = QDoubleSpinBox()
+        self.q_size_spin.setRange(6.0, 20.0)
+        self.q_size_spin.setSingleStep(0.5)
+        self.q_size_spin.setValue(9.5)
+        self.q_size_spin.setSuffix(" pt")
+        font_form.addRow("문제 글자 크기:", self.q_size_spin)
+
+        self.p_size_spin = QDoubleSpinBox()
+        self.p_size_spin.setRange(6.0, 20.0)
+        self.p_size_spin.setSingleStep(0.5)
+        self.p_size_spin.setValue(9.5)
+        self.p_size_spin.setSuffix(" pt")
+        font_form.addRow("지문 글자 크기:", self.p_size_spin)
 
         self.char_width_spin = QSpinBox()
         self.char_width_spin.setRange(50, 200)
@@ -182,11 +191,14 @@ class SettingsWindow(QDialog):
         btn_layout = QHBoxLayout()
         self.export_btn = QPushButton("설정 내보내기")
         self.import_btn = QPushButton("설정 가져오기")
+        self.save_as_preset_btn = QPushButton("프리셋으로 저장")
+        self.save_as_preset_btn.setStyleSheet("background-color: #2e7d32; color: white;")
         self.save_btn = QPushButton("저장")
         self.save_btn.setStyleSheet("background-color: #1a237e; color: white;")
         self.cancel_btn = QPushButton("취소")
         btn_layout.addWidget(self.export_btn)
         btn_layout.addWidget(self.import_btn)
+        btn_layout.addWidget(self.save_as_preset_btn)
         btn_layout.addStretch()
         btn_layout.addWidget(self.save_btn)
         btn_layout.addWidget(self.cancel_btn)
@@ -198,6 +210,7 @@ class SettingsWindow(QDialog):
         self.style_enabled_check.toggled.connect(self.setStyleControlsEnabled)
         self.export_btn.clicked.connect(self.exportConfig)
         self.import_btn.clicked.connect(self.importConfig)
+        self.save_as_preset_btn.clicked.connect(self.saveAsPreset)
         self.save_btn.clicked.connect(self.saveConfig)
         self.cancel_btn.clicked.connect(self.reject)
         self.setStyleControlsEnabled(self.style_enabled_check.isChecked())
@@ -213,7 +226,9 @@ class SettingsWindow(QDialog):
         fmt = config.get("format", {})
         q_font = fmt.get("question_font", "중고딕")
         p_font = fmt.get("passage_font", "휴먼명조")
-        font_size = float(fmt.get("font_size", 9.5))
+        base_font_size = float(fmt.get("font_size", 9.5))
+        q_font_size = float(fmt.get("question_font_size", base_font_size))
+        p_font_size = float(fmt.get("passage_font_size", base_font_size))
         char_width = int(fmt.get("char_width", 95))
         char_spacing = int(fmt.get("char_spacing", -5))
 
@@ -224,7 +239,8 @@ class SettingsWindow(QDialog):
 
         self.q_font_combo.setCurrentText(q_font)
         self.p_font_combo.setCurrentText(p_font)
-        self.size_spin.setValue(font_size)
+        self.q_size_spin.setValue(q_font_size)
+        self.p_size_spin.setValue(p_font_size)
         self.char_width_spin.setValue(char_width)
         self.char_spacing_spin.setValue(char_spacing)
 
@@ -342,7 +358,11 @@ class SettingsWindow(QDialog):
 
     def saveConfig(self):
         template_path = self.style_template_edit.text().strip()
-        if self.style_enabled_check.isChecked() and not template_path:
+        presets = self.config_manager.list_presets()
+        effective_template = template_path
+        if presets:
+            effective_template = str(self.config_manager.get("style.template_path", "")).strip()
+        if self.style_enabled_check.isChecked() and not effective_template:
             QMessageBox.warning(
                 self,
                 "스타일 연동 경고",
@@ -350,14 +370,68 @@ class SettingsWindow(QDialog):
                 "저장 후에도 스타일 적용이 제한될 수 있습니다.",
             )
 
-        partial = {
+        style_block = {
+            "enabled": self.style_enabled_check.isChecked(),
+            "module_dll_path": self.module_dll_edit.text().strip(),
+        }
+        # 프리셋이 없는 경우에만 템플릿/스타일명을 user_config에 저장 (하위 호환)
+        if not presets:
+            style_block.update({
+                "template_path": template_path,
+                "style_map_source": template_path,
+                "question_style": self.question_style_edit.text().strip() or "Normal",
+                "passage_style": self.passage_style_edit.text().strip() or "Body",
+                "choice_style": self.choice_style_edit.text().strip() or "Body",
+                "sub_items_style": self.sub_items_style_edit.text().strip() or "Body",
+                "explanation_style": self.explanation_style_edit.text().strip() or "Body",
+            })
+
+        # 공통 설정만 user_config.json에 저장 (편집 서식은 프리셋이 담당)
+        partial: dict = {
             "paths": {
                 "output_directory": self.path_edit.text().strip(),
             },
+            "style": style_block,
+        }
+
+        # 프리셋이 없는 경우에만 format/paragraph를 user_config에 저장 (하위 호환)
+        if not presets:
+            partial["format"] = {
+                "question_font": self.q_font_combo.currentText(),
+                "passage_font": self.p_font_combo.currentText(),
+                "font_size": self.q_size_spin.value(),
+                "question_font_size": self.q_size_spin.value(),
+                "passage_font_size": self.p_size_spin.value(),
+                "char_width": self.char_width_spin.value(),
+                "char_spacing": self.char_spacing_spin.value(),
+            }
+            partial["paragraph"] = {
+                "line_spacing": self.line_spacing_spin.value(),
+                "indent_value": self.indent_spin.value(),
+            }
+
+        self.config_manager.update(partial)
+        QMessageBox.information(self, "저장 완료", "설정을 저장했습니다.")
+        self.accept()
+
+    def saveAsPreset(self):
+        """현재 설정값을 새 프리셋 파일로 저장한다."""
+        from PyQt5.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(self, "프리셋 이름", "프리셋 이름을 입력하세요:")
+        if not ok or not name.strip():
+            return
+
+        desc, _ = QInputDialog.getText(self, "프리셋 설명", "프리셋 설명을 입력하세요 (선택):")
+
+        preset = {
+            "preset_name": name.strip(),
+            "preset_description": (desc or "").strip(),
             "format": {
                 "question_font": self.q_font_combo.currentText(),
                 "passage_font": self.p_font_combo.currentText(),
-                "font_size": self.size_spin.value(),
+                "font_size": self.q_size_spin.value(),
+                "question_font_size": self.q_size_spin.value(),
+                "passage_font_size": self.p_size_spin.value(),
                 "char_width": self.char_width_spin.value(),
                 "char_spacing": self.char_spacing_spin.value(),
             },
@@ -366,17 +440,19 @@ class SettingsWindow(QDialog):
                 "indent_value": self.indent_spin.value(),
             },
             "style": {
-                "enabled": self.style_enabled_check.isChecked(),
-                "template_path": template_path,
-                "style_map_source": template_path,
-                "module_dll_path": self.module_dll_edit.text().strip(),
-                "question_style": self.question_style_edit.text().strip() or "Normal",
-                "passage_style": self.passage_style_edit.text().strip() or "Body",
-                "choice_style": self.choice_style_edit.text().strip() or "Body",
-                "sub_items_style": self.sub_items_style_edit.text().strip() or "Body",
-                "explanation_style": self.explanation_style_edit.text().strip() or "Body",
+                "template_path": self.style_template_edit.text().strip(),
+                "question_style": self.question_style_edit.text().strip() or "문제",
+                "passage_style": self.passage_style_edit.text().strip() or "지문",
             },
         }
-        self.config_manager.update(partial)
-        QMessageBox.information(self, "저장 완료", "설정을 저장했습니다.")
-        self.accept()
+
+        # 안전한 파일명 생성
+        safe_name = re.sub(r'[\\/:*?"<>|]+', '_', name.strip())
+        preset_dir = Path("config/presets")
+        preset_dir.mkdir(parents=True, exist_ok=True)
+        preset_path = preset_dir / f"{safe_name}.json"
+
+        with preset_path.open("w", encoding="utf-8") as f:
+            json.dump(preset, f, ensure_ascii=False, indent=2)
+
+        QMessageBox.information(self, "프리셋 저장 완료", f"프리셋이 저장되었습니다.\n{preset_path}")

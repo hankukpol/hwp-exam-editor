@@ -162,13 +162,27 @@ class HwpController:
         if not text:
             return ""
 
+        hanja_subject = bool(re.match(r"^[甲乙丙丁戊己庚辛壬癸]\s*[은는이가을를의]", text))
+        hanja_marker_only = bool(re.fullmatch(r"[甲乙丙丁戊己庚辛壬癸]", text))
+
         # 한글/영문/숫자/문항 기호가 나오기 전의 깨진 선행 문자를 제거
-        text = re.sub(r"^[^0-9A-Za-z가-힣①②③④⑤㉠㉡㉢㉣㉤㉥★<\[\(]+", "", text)
+        # (단, 사례문 시작의 甲/乙 계열 라벨은 보존한다.)
+        if not hanja_subject and not hanja_marker_only:
+            text = re.sub(
+                r"^[^0-9A-Za-z가-힣①②③④⑤㉠㉡㉢㉣㉤㉥★<\[\(]+",
+                "",
+                text,
+            )
         if not text:
             return ""
 
         # 추출 과정에서 반복되는 무의미 1~2글자 노이즈 제거
-        if len(text) <= 2 and not re.search(r"[0-9A-Za-z가-힣①②③④⑤]", text):
+        if hanja_marker_only:
+            return text
+        if len(text) <= 2 and not re.search(
+            r"[0-9A-Za-z가-힣①②③④⑤]",
+            text,
+        ):
             return ""
         if re.fullmatch(r"[-.=·•▪▫◦※*]+", text):
             return ""

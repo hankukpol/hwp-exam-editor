@@ -33,6 +33,12 @@ class GeneratorSubItemsTablePolicyTestCase(unittest.TestCase):
         ]
         self.assertTrue(generator._should_use_sub_items_table(sub_items, prefer_table=True))
 
+    def test_has_table_preference_allows_single_line_box(self) -> None:
+        generator = _make_generator(True)
+        sub_items = ["甲은 늦은 밤 귀가하던 중 A로 오인하였다."]
+        self.assertTrue(generator._should_use_sub_items_table(sub_items, prefer_table=True))
+        self.assertFalse(generator._should_use_sub_items_table(sub_items, prefer_table=False))
+
     def test_global_table_toggle_still_disables_table(self) -> None:
         generator = _make_generator(False)
         sub_items = [

@@ -42,6 +42,10 @@ class FormatterQuestionStyleClassificationTestCase(unittest.TestCase):
         text = "\ufeff4. question"
         self.assertEqual(self.formatter._classify_paragraph_style(text, 7, 9), 7)
 
+    def test_leading_control_noise_still_matches_question(self) -> None:
+        text = "\x01\x02< 5. question"
+        self.assertEqual(self.formatter._classify_paragraph_style(text, 7, 9), 7)
+
     def test_non_question_line_is_passage_style(self) -> None:
         self.assertEqual(self.formatter._classify_paragraph_style("passage text", 7, 9), 9)
 
@@ -81,6 +85,22 @@ class FormatterQuestionStyleClassificationTestCase(unittest.TestCase):
         self.assertEqual(formatter_module.struct.unpack_from("<I", buf, 4)[0], 300)
         self.assertEqual(formatter_module.struct.unpack_from("<I", buf, 12)[0], 200)
         self.assertEqual(formatter_module.struct.unpack_from("<I", buf, 20)[0], 300)
+
+    def test_rewrite_para_char_shape_runs_normalizes_cross_style_ids(self) -> None:
+        # runs: [target, opposite-style] -> normalize opposite-style to target.
+        payload_size = 2 * 8
+        buf = bytearray(payload_size)
+        formatter_module.struct.pack_into("<I", buf, 0, 0)
+        formatter_module.struct.pack_into("<I", buf, 4, 300)
+        formatter_module.struct.pack_into("<I", buf, 8, 7)
+        formatter_module.struct.pack_into("<I", buf, 12, 100)
+
+        changed = self.formatter._rewrite_para_char_shape_runs(
+            buf, 0, payload_size, 300, normalize_from_ids={100, 300}
+        )
+        self.assertTrue(changed)
+        self.assertEqual(formatter_module.struct.unpack_from("<I", buf, 4)[0], 300)
+        self.assertEqual(formatter_module.struct.unpack_from("<I", buf, 12)[0], 300)
 
     def test_parse_style_para_id_extracts_tail_value(self) -> None:
         local = "A".encode("utf-16le")
@@ -131,7 +151,9 @@ class FormatterQuestionStyleClassificationTestCase(unittest.TestCase):
     def test_apply_question_inline_char_emphasis_uses_current_face(self) -> None:
         captured: dict[str, object] = {"calls": []}
 
-        def _fake_apply_char_shape(hwp, font_name: str, bold: bool, underline: bool) -> None:
+        def _fake_apply_char_shape(
+            hwp, font_name: str, bold: bool, underline: bool, font_size: float | None = None,
+        ) -> None:
             captured["calls"].append("char")
             captured["font_name"] = font_name
             captured["bold"] = bold
@@ -148,7 +170,9 @@ class FormatterQuestionStyleClassificationTestCase(unittest.TestCase):
     def test_apply_question_inline_char_emphasis_can_use_bold_when_enabled(self) -> None:
         captured: dict[str, object] = {}
 
-        def _fake_apply_char_shape(hwp, font_name: str, bold: bool, underline: bool) -> None:
+        def _fake_apply_char_shape(
+            hwp, font_name: str, bold: bool, underline: bool, font_size: float | None = None,
+        ) -> None:
             captured["font_name"] = font_name
             captured["bold"] = bold
             captured["underline"] = underline

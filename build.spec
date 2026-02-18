@@ -14,6 +14,8 @@ a = Analysis(
     binaries=[],
     datas=[
         ("config/default_config.json", "config"),
+        ("config/presets", "config/presets"),
+        ("config/templates", "config/templates"),
     ],
     hiddenimports=[
         "win32com",

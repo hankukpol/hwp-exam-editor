@@ -72,6 +72,13 @@ class OutputGenerator:
         self._run_warnings = []
         self._last_hwp_error = ""
         self._resolved_template_path = self._resolve_template_path() if self._base_style_enabled else None
+        if self._base_style_enabled:
+            style_source = str(self.style_config.get("style_map_source", "")).strip()
+            if not style_source:
+                style_source = self._template_path_raw
+            if self._resolved_template_path is not None:
+                style_source = str(self._resolved_template_path)
+            self.formatter.reload_style_index_map(style_source)
         config_warnings = self._collect_style_config_warnings()
         for warning in config_warnings:
             self._warn(warning)
@@ -1004,10 +1011,12 @@ class OutputGenerator:
     def _should_use_sub_items_table(self, sub_items: list[str], prefer_table: bool = False) -> bool:
         if not self._use_sub_items_table:
             return False
-        if len(sub_items) < 2:
+        if len(sub_items) < 1:
             return False
         if prefer_table:
             return True
+        if len(sub_items) < 2:
+            return False
 
         lengths = [len((line or "").strip()) for line in sub_items]
         if not lengths:

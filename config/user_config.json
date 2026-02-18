@@ -15,13 +15,14 @@
   },
   "style": {
     "enabled": true,
-    "template_path": "D:/앱 프로그램/아침모의고사 자동편집 프로그램/tests/sample_files/결과 샘플.hwp",
-    "style_map_source": "D:/앱 프로그램/아침모의고사 자동편집 프로그램/tests/sample_files/결과 샘플.hwp",
+    "template_path": "D:/앱 프로그램/아침모의고사 자동편집 프로그램/config/templates/정기모의고사 템플릿.hwp",
+    "style_map_source": "D:/앱 프로그램/아침모의고사 자동편집 프로그램/config/templates/정기모의고사 템플릿.hwp",
     "question_style": "문제",
     "passage_style": "지문",
     "choice_style": "지문",
     "sub_items_style": "지문",
     "explanation_style": "지문",
     "module_dll_path": "C:/Program Files (x86)/Hnc/HOffice9/Bin/FilePathCheckerModuleExample.dll"
-  }
+  },
+  "active_preset": "정기모의고사"
 }

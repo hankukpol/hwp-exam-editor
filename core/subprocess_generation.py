@@ -171,7 +171,11 @@ def main(argv: list[str]) -> int:
             except Exception:
                 pass
 
-        service = ExamProcessingService(ConfigManager())
+        cm = ConfigManager()
+        preset_file = str(request.get("active_preset", ""))
+        if preset_file:
+            cm.load_with_preset(preset_file)
+        service = ExamProcessingService(cm)
         if force_disable_style:
             try:
                 service.generator._base_style_enabled = False

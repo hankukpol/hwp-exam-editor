@@ -32,6 +32,17 @@ class RealSampleParsingTestCase(unittest.TestCase):
         self.assertEqual(doc.total_count, 20)
         self.assertGreaterEqual(sum(1 for q in doc.questions if q.answer), 20)
 
+    def test_parse_criminal_law_q19_boxed_case_is_preserved(self) -> None:
+        path = self._sample("6주차 - 특수폭행 ~ 경매(위전착).hwp")
+        doc = self.service.parse_file(path)
+        q19 = next((q for q in doc.questions if q.number == 19), None)
+        self.assertIsNotNone(q19)
+        assert q19 is not None
+        self.assertEqual(q19.question_text, "다음 사례에 대한 설명으로 가장 적절한 것은?")
+        self.assertTrue(q19.has_table)
+        self.assertEqual(len(q19.sub_items), 1)
+        self.assertTrue(q19.sub_items[0].startswith("甲은 "))
+
     def test_parse_constitution_sample_without_numbers(self) -> None:
         path = self._sample("[헌법] [6주차]  26년 1-2월 헌법 아침모의고사_2.9.(월)_집회결사~재산권.hwp")
         doc = self.service.parse_file(path)

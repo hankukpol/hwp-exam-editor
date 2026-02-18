@@ -26,6 +26,10 @@ CIRCLE_FROM_DIGIT = {
 
 
 class ExamParser:
+    _BOXED_PASSAGE_START_RE = re.compile(r"^\s*[甲乙丙丁戊己庚辛壬癸]\s*[은는이가을를의]")
+    _QUESTION_PROMPT_RE = re.compile(r"[?？]\s*$")
+    _BOXED_PASSAGE_NOISE_RE = re.compile(r"^[\u3400-\u9FFF\uF900-\uFAFF]{2}$")
+
     def __init__(self, config: dict[str, Any]) -> None:
         parsing = config.get("parsing", {})
         self.question_patterns: list[str] = parsing.get(
@@ -247,6 +251,31 @@ class ExamParser:
             return CIRCLE_FROM_DIGIT.get(digit.group(1))
         return None
 
+    def _split_boxed_passage_lines(
+        self, body_lines: list[str], choices: list[str],
+    ) -> tuple[list[str], list[str]]:
+        """사례형(박스) 지문을 문제 본문에서 분리한다."""
+        if choices is None or len(choices) == 0:
+            return body_lines, []
+        if len(body_lines) < 2:
+            return body_lines, []
+
+        stem = (body_lines[0] or "").strip()
+        raw_passage_lines = [(line or "").strip() for line in body_lines[1:] if (line or "").strip()]
+        passage_lines = [
+            line for line in raw_passage_lines
+            if not self._BOXED_PASSAGE_NOISE_RE.fullmatch(line)
+        ]
+        if not passage_lines:
+            return body_lines, []
+        if not self._QUESTION_PROMPT_RE.search(stem):
+            return body_lines, []
+
+        first_line = passage_lines[0]
+        if self._BOXED_PASSAGE_START_RE.match(first_line):
+            return [stem], passage_lines
+        return body_lines, []
+
     def _build_question(
         self,
         number: int,
@@ -269,10 +298,16 @@ class ExamParser:
                 continue
             body_lines.append(line)
 
+        detected_boxed_sub_items: list[str] = []
+        if not sub_items:
+            body_lines, detected_boxed_sub_items = self._split_boxed_passage_lines(body_lines, choices)
+            if detected_boxed_sub_items:
+                sub_items.extend(detected_boxed_sub_items)
+
         question_text = "\n".join(body_lines).strip()
         explanation = "\n".join(explanation_lines).strip() or None
         negative_keyword = detect_negative_keyword(question_text, self.negative_keywords)
-        has_table = len(sub_items) >= 2
+        has_table = len(sub_items) >= 2 or bool(detected_boxed_sub_items)
 
         return ExamQuestion(
             number=number,

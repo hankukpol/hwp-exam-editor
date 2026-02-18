@@ -90,6 +90,26 @@ class ParserTestCase(unittest.TestCase):
         self.assertEqual(document.questions[0].answer, "④")
         self.assertEqual(document.questions[1].answer, "②")
 
+    def test_hanja_case_line_is_promoted_to_boxed_sub_item(self) -> None:
+        blocks = [
+            "19. 다음 사례에 대한 설명으로 가장 적절한 것은?",
+            "氠瑢",
+            "甲은 늦은 밤 귀가하던 중 자신의 뒤편에서 다가오는 사람을 A로 오인하였다.",
+            "① 보기1",
+            "② 보기2",
+            "③ 보기3",
+            "④ 보기4",
+        ]
+        document = self.parser.parse_text_blocks(blocks, subject="형법")
+        self.assertEqual(document.total_count, 1)
+        question = document.questions[0]
+        self.assertEqual(question.question_text, "다음 사례에 대한 설명으로 가장 적절한 것은?")
+        self.assertEqual(
+            question.sub_items,
+            ["甲은 늦은 밤 귀가하던 중 자신의 뒤편에서 다가오는 사람을 A로 오인하였다."],
+        )
+        self.assertTrue(question.has_table)
+
 
 if __name__ == "__main__":
     unittest.main()

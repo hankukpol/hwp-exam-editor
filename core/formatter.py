@@ -20,6 +20,13 @@ except ImportError:  # pragma: no cover
 TAG_STYLE = 26
 TAG_ID_MAPPINGS = 17
 
+PAPER_SIZES: dict[str, tuple[float, float]] = {
+    "A4": (210.0, 297.0),
+    "B4": (257.0, 364.0),
+    "B5": (182.0, 257.0),
+    "Letter": (215.9, 279.4),
+}
+
 
 def _safe_set_attr(target: Any, name: str, value: Any) -> None:
     # 1) direct COM property set
@@ -64,7 +71,10 @@ class HwpFormatter:
         self.question_font = str(self.format_config.get("question_font", "중고딕")).strip() or "중고딕"
         self.passage_font = str(self.format_config.get("passage_font", "휴먼명조")).strip() or "휴먼명조"
         self.symbol_font = "바탕"
-        self.font_size = float(self.format_config.get("font_size", 9.5))
+        base_font_size = float(self.format_config.get("font_size", 9.5))
+        self.question_font_size = float(self.format_config.get("question_font_size", base_font_size))
+        self.passage_font_size = float(self.format_config.get("passage_font_size", base_font_size))
+        self.font_size = base_font_size
         self.char_width = int(self.format_config.get("char_width", 95))
         self.char_spacing = int(self.format_config.get("char_spacing", -5))
         self.columns = int(self.format_config.get("columns", 2))
@@ -90,6 +100,12 @@ class HwpFormatter:
         self.style_runtime_warnings: list[str] = []
         self._style_runtime_warning_seen: set[str] = set()
         self._last_applied_style_index: int = -1
+
+    def reload_style_index_map(self, source_hwp: str | None = None) -> None:
+        if source_hwp is not None:
+            self.style_map_source = str(source_hwp).strip()
+        self.style_index_map = self._load_style_index_map(self.style_map_source)
+        self._seed_builtin_style_aliases()
 
     def _seed_builtin_style_aliases(self) -> None:
         builtins = {
@@ -234,6 +250,12 @@ class HwpFormatter:
             return self.passage_font
         return None
 
+    def _get_font_size_for_style(self, style_name: str) -> float:
+        """스타일 이름에 해당하는 글자 크기를 반환한다."""
+        if style_name == self.question_style:
+            return self.question_font_size
+        return self.passage_font_size
+
     def apply_style(self, hwp: Any, style_name: str) -> bool:
         """스타일에 해당하는 CharShape/ParaShape를 직접 적용한다.
 
@@ -251,8 +273,9 @@ class HwpFormatter:
             self._record_style_warning(f"스타일에 대응하는 글꼴을 찾지 못했습니다: {text}")
             return False
 
+        size = self._get_font_size_for_style(text)
         self.apply_paragraph_format(hwp)
-        self._apply_char_shape(hwp, font_name=font_name, bold=False, underline=False)
+        self._apply_char_shape(hwp, font_name=font_name, bold=False, underline=False, font_size=size)
         return True
 
     def setup_page(self, hwp: Any) -> None:
@@ -261,9 +284,11 @@ class HwpFormatter:
             sec = hwp.HParameterSet.HSecDef
             page = sec.PageDef
 
+            paper_type = str(self.page_config.get("paper_type", "A4"))
+            width, height = PAPER_SIZES.get(paper_type, (210.0, 297.0))
             _safe_set_attr(page, "Landscape", 0)
-            _safe_set_attr(page, "PaperWidth", hwp.MiliToHwpUnit(210.0))
-            _safe_set_attr(page, "PaperHeight", hwp.MiliToHwpUnit(297.0))
+            _safe_set_attr(page, "PaperWidth", hwp.MiliToHwpUnit(width))
+            _safe_set_attr(page, "PaperHeight", hwp.MiliToHwpUnit(height))
             _safe_set_attr(page, "TopMargin", hwp.MiliToHwpUnit(float(self.page_config.get("top_margin", 15.0))))
             _safe_set_attr(page, "BottomMargin", hwp.MiliToHwpUnit(float(self.page_config.get("bottom_margin", 10.0))))
             _safe_set_attr(page, "LeftMargin", hwp.MiliToHwpUnit(float(self.page_config.get("left_margin", 15.0))))
@@ -288,7 +313,8 @@ class HwpFormatter:
             _safe_set_attr(col, "Type", 0)
             _safe_set_attr(col, "Count", self.columns)
             _safe_set_attr(col, "SameSize", 1)
-            _safe_set_attr(col, "SameGap", hwp.MiliToHwpUnit(8.0))
+            column_gap = float(self.page_config.get("column_gap", 8.0))
+            _safe_set_attr(col, "SameGap", hwp.MiliToHwpUnit(column_gap))
             hwp.HAction.Execute("MultiColumn", hwp.HParameterSet.HColDef.HSet)
         except Exception as exc:
             self._record_style_warning(f"다단 설정 적용 실패: {type(exc).__name__}: {exc}")
@@ -303,6 +329,7 @@ class HwpFormatter:
             font_name=self.question_font,
             bold=emphasize,
             underline=emphasize,
+            font_size=self.question_font_size,
         )
 
     def apply_question_inline_char(self, hwp: Any, emphasize: bool = False) -> None:
@@ -312,6 +339,7 @@ class HwpFormatter:
             font_name=self.question_font,
             bold=bold,
             underline=emphasize,
+            font_size=self.question_font_size,
         )
 
     def apply_passage_format(self, hwp: Any) -> None:
@@ -323,6 +351,7 @@ class HwpFormatter:
             font_name=self.passage_font,
             bold=False,
             underline=False,
+            font_size=self.passage_font_size,
         )
 
     def apply_choice_format(self, hwp: Any) -> None:
@@ -374,6 +403,7 @@ class HwpFormatter:
         font_name: str,
         bold: bool,
         underline: bool,
+        font_size: float | None = None,
     ) -> None:
         try:
             candidates = self._font_candidates(font_name)
@@ -395,7 +425,8 @@ class HwpFormatter:
                 for face_attr in ("FaceNameSymbol", "FaceNameUser"):
                     _safe_set_attr(cs, face_attr, self.symbol_font)
 
-                _safe_set_attr(cs, "Height", hwp.PointToHwpUnit(self.font_size))
+                effective_size = font_size if font_size is not None else self.font_size
+                _safe_set_attr(cs, "Height", hwp.PointToHwpUnit(effective_size))
                 for attr in (
                     "RatioHangul",
                     "RatioHanja",
@@ -549,35 +580,59 @@ class HwpFormatter:
             return False
         question_idx = self._resolve_style_index(self.question_style)
         passage_idx = self._resolve_style_index(self.passage_style)
-        if question_idx is None and passage_idx is None:
-            self._record_style_warning(
-                f"문제/지문 스타일을 찾지 못했습니다: {self.question_style}, {self.passage_style}"
-            )
-            # Fallback: keep inline-emphasis face consistent even when style ids are unavailable.
-            try:
-                return self.post_process_question_emphasis_faces(file_path)
-            except Exception as exc:
-                self._record_style_warning(f"강조 폰트 후처리 실패: {type(exc).__name__}: {exc}")
-                return False
-        if question_idx is None:
-            fallback = passage_idx if passage_idx is not None else 0
-            self._record_style_warning(
-                f"문제 스타일을 찾지 못해 대체 스타일로 처리합니다: {self.question_style}"
-            )
-            question_idx = fallback
-        if passage_idx is None:
-            fallback = question_idx if question_idx is not None else 0
-            self._record_style_warning(
-                f"지문 스타일을 찾지 못해 대체 스타일로 처리합니다: {self.passage_style}"
-            )
-            passage_idx = fallback
+        base_question_idx = question_idx
+        base_passage_idx = passage_idx
 
         try:
-            # 저장된 파일의 DocInfo에 템플릿 스타일을 이식 (문제/지문 등)
-            if not self._transplant_template_styles(file_path):
+            # 저장 파일에 문제/지문 스타일 정의가 이미 있으면 이식 단계를 건너뛴다.
+            # (일부 문서에서는 스타일 정의만 교체할 때 shape id 참조가 깨질 수 있음)
+            output_style_map = self._load_style_index_map(str(file_path))
+            q_name = (self.question_style or "").strip()
+            p_name = (self.passage_style or "").strip()
+            has_q = bool(q_name) and (q_name in output_style_map or q_name.lower() in output_style_map)
+            has_p = bool(p_name) and (p_name in output_style_map or p_name.lower() in output_style_map)
+            need_transplant = not (has_q and has_p)
+            if need_transplant and not self._transplant_template_styles(file_path):
                 self._record_style_warning(
                     "템플릿 스타일 이식에 실패했습니다. 출력 파일의 기본 스타일이 사용됩니다."
                 )
+            # 출력 파일의 실제 style 순서를 기준으로 인덱스를 다시 잡는다.
+            # 템플릿 변경/저장 과정에서 style 레코드 순서가 달라져도 문제/지문 매핑을 유지한다.
+            self.reload_style_index_map(str(file_path))
+            question_idx = self._resolve_style_index(self.question_style)
+            passage_idx = self._resolve_style_index(self.passage_style)
+            if question_idx is None and base_question_idx is not None:
+                question_idx = base_question_idx
+                self._record_style_warning(
+                    f"출력 문서에서 문제 스타일을 찾지 못해 기존 인덱스를 사용합니다: {self.question_style}"
+                )
+            if passage_idx is None and base_passage_idx is not None:
+                passage_idx = base_passage_idx
+                self._record_style_warning(
+                    f"출력 문서에서 지문 스타일을 찾지 못해 기존 인덱스를 사용합니다: {self.passage_style}"
+                )
+            if question_idx is None and passage_idx is None:
+                self._record_style_warning(
+                    f"문제/지문 스타일을 찾지 못했습니다: {self.question_style}, {self.passage_style}"
+                )
+                # Fallback: keep inline-emphasis face consistent even when style ids are unavailable.
+                try:
+                    return self.post_process_question_emphasis_faces(file_path)
+                except Exception as exc:
+                    self._record_style_warning(f"강조 폰트 후처리 실패: {type(exc).__name__}: {exc}")
+                    return False
+            if question_idx is None:
+                fallback = passage_idx if passage_idx is not None else 0
+                self._record_style_warning(
+                    f"문제 스타일을 찾지 못해 대체 스타일로 처리합니다: {self.question_style}"
+                )
+                question_idx = fallback
+            if passage_idx is None:
+                fallback = question_idx if question_idx is not None else 0
+                self._record_style_warning(
+                    f"지문 스타일을 찾지 못해 대체 스타일로 처리합니다: {self.passage_style}"
+                )
+                passage_idx = fallback
             result = self._rewrite_style_ids(file_path, question_idx, passage_idx)
             # Safety pass: some HWP builds keep zero-face inline charshapes.
             try:
@@ -610,6 +665,24 @@ class HwpFormatter:
             question_emphasis_char_ids: set[int] = set()
             question_para_shape_id: int | None = style_para_ids.get(question_idx)
             passage_para_shape_id: int | None = style_para_ids.get(passage_idx)
+            char_heights = self._collect_docinfo_charshape_heights(ole, compressed)
+            question_expected_height = int(round(float(self.question_font_size) * 100))
+            passage_expected_height = int(round(float(self.passage_font_size) * 100))
+            if question_char_id is not None:
+                actual = char_heights.get(int(question_char_id))
+                if actual is not None and abs(int(actual) - question_expected_height) > 1:
+                    # Keep direct formatting if style-char mapping points to a mismatched size.
+                    question_char_id = None
+            if passage_char_id is not None:
+                actual = char_heights.get(int(passage_char_id))
+                if actual is not None and abs(int(actual) - passage_expected_height) > 1:
+                    # Keep direct formatting if style-char mapping points to a mismatched size.
+                    passage_char_id = None
+            para_shape_count = self._count_docinfo_records_by_tag(ole, compressed, 25)
+            if question_para_shape_id is not None and not (0 <= int(question_para_shape_id) < para_shape_count):
+                question_para_shape_id = None
+            if passage_para_shape_id is not None and not (0 <= int(passage_para_shape_id) < para_shape_count):
+                passage_para_shape_id = None
             question_para_shape_offsets: list[int] = []
             passage_para_shape_offsets: list[int] = []
 
@@ -683,7 +756,18 @@ class HwpFormatter:
                             cid = int(struct.unpack_from("<I", modified, data_start + off + 4)[0])
                             if cid != int(active_char_id):
                                 question_emphasis_char_ids.add(cid)
-                    if self._rewrite_para_char_shape_runs(modified, data_start, size, int(active_char_id)):
+                    normalize_from_ids: set[int] = set()
+                    if question_char_id is not None:
+                        normalize_from_ids.add(int(question_char_id))
+                    if passage_char_id is not None:
+                        normalize_from_ids.add(int(passage_char_id))
+                    if self._rewrite_para_char_shape_runs(
+                        modified,
+                        data_start,
+                        size,
+                        int(active_char_id),
+                        normalize_from_ids=normalize_from_ids,
+                    ):
                         changed = True
 
                 pos = data_start + size
@@ -986,6 +1070,72 @@ class HwpFormatter:
 
             pos = data_start + size
         return style_char_ids
+
+    @staticmethod
+    def _collect_docinfo_charshape_heights(
+        ole: "olefile.OleFileIO", compressed: bool,
+    ) -> dict[int, int]:
+        if not ole.exists("DocInfo"):
+            return {}
+        raw = ole.openstream("DocInfo").read()
+        data = zlib.decompress(raw, -15) if compressed else raw
+
+        heights: dict[int, int] = {}
+        charshape_index = 0
+        pos = 0
+        while pos + 4 <= len(data):
+            h = struct.unpack_from("<I", data, pos)[0]
+            tag_id = h & 0x3FF
+            size = (h >> 20) & 0xFFF
+            data_start = pos + 4
+            if size == 0xFFF:
+                if data_start + 4 > len(data):
+                    break
+                size = struct.unpack_from("<I", data, data_start)[0]
+                data_start += 4
+            if data_start + size > len(data):
+                break
+
+            if tag_id == 21:
+                if size >= 46:
+                    try:
+                        heights[charshape_index] = int(struct.unpack_from("<i", data, data_start + 42)[0])
+                    except Exception:
+                        pass
+                charshape_index += 1
+
+            pos = data_start + size
+        return heights
+
+    @staticmethod
+    def _count_docinfo_records_by_tag(
+        ole: "olefile.OleFileIO", compressed: bool, target_tag: int,
+    ) -> int:
+        if not ole.exists("DocInfo"):
+            return 0
+        raw = ole.openstream("DocInfo").read()
+        data = zlib.decompress(raw, -15) if compressed else raw
+
+        count = 0
+        pos = 0
+        while pos + 4 <= len(data):
+            h = struct.unpack_from("<I", data, pos)[0]
+            tag_id = h & 0x3FF
+            size = (h >> 20) & 0xFFF
+            data_start = pos + 4
+            if size == 0xFFF:
+                if data_start + 4 > len(data):
+                    break
+                size = struct.unpack_from("<I", data, data_start)[0]
+                data_start += 4
+            if data_start + size > len(data):
+                break
+
+            if tag_id == int(target_tag):
+                count += 1
+
+            pos = data_start + size
+        return count
 
     @staticmethod
     def _collect_style_para_ids(
@@ -1310,6 +1460,11 @@ class HwpFormatter:
             # template base para-shape (for example 160% line spacing).
             return passage_idx
         candidate = stripped.lstrip("\ufeff\u200b\u2060\xa0")
+        candidate = re.sub(
+            r"^[^0-9A-Za-z가-힣\u3400-\u9FFF\uF900-\uFAFF①②③④⑤㉠㉡㉢㉣㉤㉥]{1,8}",
+            "",
+            candidate,
+        )
         if self._QUESTION_NUMBER_RE.match(candidate):
             return question_idx
         return passage_idx
@@ -1325,7 +1480,11 @@ class HwpFormatter:
 
     @staticmethod
     def _rewrite_para_char_shape_runs(
-        buffer: bytearray, data_start: int, payload_size: int, target_char_id: int,
+        buffer: bytearray,
+        data_start: int,
+        payload_size: int,
+        target_char_id: int,
+        normalize_from_ids: set[int] | None = None,
     ) -> bool:
         run_count = HwpFormatter._para_char_shape_run_count(payload_size)
         if run_count <= 0:
@@ -1340,12 +1499,24 @@ class HwpFormatter:
             return False
 
         changed = False
+        normalize_ids = {int(v) for v in (normalize_from_ids or set()) if v is not None}
+        if int(target_char_id) in normalize_ids:
+            normalize_ids.discard(int(target_char_id))
         if run_count == 1:
             current_char_id = run_ids[0]
             if current_char_id != target_char_id:
                 struct.pack_into("<I", buffer, data_start + offsets[0], int(target_char_id))
                 changed = True
             return changed
+
+        # Normalize obvious cross-style contamination first
+        # (for example, passage charshape id inside a question paragraph).
+        if normalize_ids:
+            for idx, current_char_id in enumerate(run_ids):
+                if current_char_id in normalize_ids and current_char_id != target_char_id:
+                    struct.pack_into("<I", buffer, data_start + offsets[idx], int(target_char_id))
+                    run_ids[idx] = int(target_char_id)
+                    changed = True
 
         counts: dict[int, int] = {}
         first_pos: dict[int, int] = {}

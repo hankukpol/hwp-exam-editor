@@ -10,7 +10,8 @@ import uuid
 from pathlib import Path
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                               QLabel, QPushButton, QFileDialog, QProgressBar,
-                              QFrame, QAction, QMessageBox, QApplication)
+                              QFrame, QAction, QMessageBox, QApplication,
+                              QComboBox)
 from PyQt5.QtCore import Qt, pyqtSignal, QThread, QTimer, QUrl
 from PyQt5.QtGui import QIcon, QDesktopServices
 
@@ -308,17 +309,49 @@ class GenerationWorker(QThread):
         source_file: str,
         timeout_sec: int = 60,
         style_required: bool = False,
+        active_preset: str = "",
     ):
         super().__init__()
         self.document = document
         self.source_file = source_file
-        self.timeout_sec = timeout_sec
         self.style_required = style_required
+        self.active_preset = active_preset
+        self._question_count = max(
+            1,
+            int(getattr(document, "total_count", 0) or len(getattr(document, "questions", [])) or 1),
+        )
+        self._has_explanation_sheet = str(getattr(document, "file_type", "")).upper() == "TYPE_A"
+        self.timeout_sec = self._compute_timeout_sec(timeout_sec)
         self._proc: subprocess.Popen[str] | None = None
         self._last_progress_raw = ""
         self._last_progress_pct = 0
         self._last_progress_msg = ""
         self._cancel_reason = "출력 생성이 취소되었습니다."
+
+    def _compute_timeout_sec(self, base_timeout: int) -> int:
+        base = max(60, int(base_timeout))
+        per_question_sec = 1.6 if self._has_explanation_sheet else 0.9
+        overhead_sec = 45 if self.style_required else 30
+        style_factor = 1.25 if self.style_required else 1.0
+        estimated = int((overhead_sec + (self._question_count * per_question_sec)) * style_factor)
+        return max(base, min(900, estimated))
+
+    def _compute_stall_limit_sec(self, force_disable_style: bool) -> int:
+        if self.style_required and not force_disable_style:
+            scaled = 90 + int(self._question_count * (1.2 if self._has_explanation_sheet else 0.8))
+            return max(120, min(600, scaled))
+        scaled = 45 + int(self._question_count * 0.6)
+        return max(60, min(300, scaled))
+
+    def _compute_rpc_retry_timeout_sec(self) -> int:
+        return max(90, min(300, int(self.timeout_sec * 0.9)))
+
+    def _compute_safe_retry_timeout_sec(self) -> int:
+        return max(60, min(300, int(self.timeout_sec * 0.75)))
+
+    def guard_timeout_sec(self) -> int:
+        retry_budget = max(self._compute_rpc_retry_timeout_sec(), self._compute_safe_retry_timeout_sec())
+        return int(self.timeout_sec + retry_budget + 45)
 
     def cancel(self, reason: str = "출력 생성이 취소되었습니다.") -> None:
         self._cancel_reason = reason
@@ -381,7 +414,9 @@ class GenerationWorker(QThread):
         creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
         mode = "safe-no-style" if force_disable_style else "style"
         _append_generation_log(
-            f"generation start | mode={mode} | timeout={timeout_sec}s | source={self.source_file}"
+            "generation start | "
+            f"mode={mode} | timeout={timeout_sec}s | q={self._question_count} "
+            f"| type={self.document.file_type} | source={self.source_file}"
         )
         _append_generation_log(f"generation cmd | {' '.join(cmd)}")
         self._proc = subprocess.Popen(
@@ -395,7 +430,7 @@ class GenerationWorker(QThread):
         started_at = time.monotonic()
         last_progress_change_at = started_at
         last_progress_snapshot = ""
-        stall_limit_sec = 120 if (self.style_required and not force_disable_style) else 30
+        stall_limit_sec = self._compute_stall_limit_sec(force_disable_style)
 
         while True:
             if self.isInterruptionRequested():
@@ -466,6 +501,7 @@ class GenerationWorker(QThread):
             request = {
                 "document": _document_to_payload(self.document),
                 "source_file": self.source_file,
+                "active_preset": self.active_preset,
             }
             result = self._run_subprocess_attempt(
                 request_path=request_path,
@@ -502,7 +538,7 @@ class GenerationWorker(QThread):
                     _append_generation_log("generation failed with RPC error -> retry once after HWP cleanup")
                     _kill_all_hwp()
                     time.sleep(2)
-                    retry_timeout = max(45, min(90, self.timeout_sec + 30))
+                    retry_timeout = self._compute_rpc_retry_timeout_sec()
                     try:
                         retry_result = self._run_subprocess_attempt(
                             request_path=request_path,
@@ -562,7 +598,7 @@ class GenerationWorker(QThread):
                 return
 
             try:
-                retry_timeout = max(30, min(60, self.timeout_sec))
+                retry_timeout = self._compute_safe_retry_timeout_sec()
                 _append_generation_log(
                     f"retry start | mode=safe-no-style | timeout={retry_timeout}s"
                 )
@@ -652,11 +688,12 @@ class BatchGenerationWorker(QThread):
     progress = pyqtSignal(int, str)
     completed = pyqtSignal(list, list)
 
-    def __init__(self, file_paths: list[str], timeout_sec: int = 60, style_required: bool = False):
+    def __init__(self, file_paths: list[str], timeout_sec: int = 60, style_required: bool = False, active_preset: str = ""):
         super().__init__()
         self.file_paths = list(file_paths)
         self.timeout_sec = timeout_sec
         self.style_required = style_required
+        self.active_preset = active_preset
 
     def run(self):
         total = len(self.file_paths)
@@ -664,7 +701,10 @@ class BatchGenerationWorker(QThread):
             self.completed.emit([], [])
             return
 
-        service = ExamProcessingService(ConfigManager())
+        cm = ConfigManager()
+        if self.active_preset:
+            cm.load_with_preset(self.active_preset)
+        service = ExamProcessingService(cm)
         successes: list[dict] = []
         failures: list[dict] = []
 
@@ -698,6 +738,7 @@ class BatchGenerationWorker(QThread):
                 source_file=file_path,
                 timeout_sec=self.timeout_sec,
                 style_required=self.style_required,
+                active_preset=self.active_preset,
             )
             worker.progress.connect(
                 lambda pct, msg, idx=index, count=total: self.progress.emit(
@@ -783,6 +824,18 @@ class MainWindow(QMainWindow):
         subtitle_label = QLabel("선택한 원본 파일을 동원 형식으로 자동 변환합니다.")
         subtitle_label.setObjectName("SubTitle")
         main_layout.addWidget(subtitle_label)
+
+        # 프리셋 선택 영역
+        preset_group = QHBoxLayout()
+        preset_label = QLabel("시험 유형:")
+        self.preset_combo = QComboBox()
+        self.preset_combo.setMinimumWidth(250)
+        self._load_preset_list()
+        self.preset_combo.currentIndexChanged.connect(self._on_preset_changed)
+        preset_group.addWidget(preset_label)
+        preset_group.addWidget(self.preset_combo)
+        preset_group.addStretch()
+        main_layout.addLayout(preset_group)
 
         self.drop_area = DropArea()
         self.drop_area.fileDropped.connect(self.handleFileSelect)
@@ -909,6 +962,7 @@ class MainWindow(QMainWindow):
         settings = SettingsWindow(self.config_manager, self)
         if settings.exec_():
             self.service.reload_config()
+            self._load_preset_list()
             QMessageBox.information(self, "설정 저장", "설정이 저장되었습니다.")
 
     def showHelp(self):
@@ -969,6 +1023,7 @@ class MainWindow(QMainWindow):
             file_paths=files,
             timeout_sec=60,
             style_required=style_enabled,
+            active_preset=self.config_manager.get_active_preset_file(),
         )
         self._batch_worker.progress.connect(self._on_batch_progress)
         self._batch_worker.completed.connect(self._on_batch_completed)
@@ -1047,14 +1102,14 @@ class MainWindow(QMainWindow):
             self.selected_file,
             timeout_sec=timeout_sec,
             style_required=style_enabled,
+            active_preset=self.config_manager.get_active_preset_file(),
         )
         self._generate_worker.succeeded.connect(self._on_generation_succeeded)
         self._generate_worker.failed.connect(self._on_generation_failed)
         self._generate_worker.finished.connect(self._on_generation_finished)
         self._generate_worker.progress.connect(self._on_generation_progress)
-        # 가드 타이머: 첫 시도(timeout_sec) + 재시도(최대 60s) + 정리/대기 여유(30s)
-        retry_timeout = max(30, min(60, self._generate_worker.timeout_sec))
-        guard_ms = int((self._generate_worker.timeout_sec + retry_timeout + 30) * 1000)
+        # 가드 타이머: 문항 수 기반으로 계산된 워커 제한시간 + 재시도 예산 + 정리 여유.
+        guard_ms = int(self._generate_worker.guard_timeout_sec() * 1000)
         self._generation_guard_timer.start(guard_ms)
         _append_generation_log(f"ui start generation | guard_ms={guard_ms} | file={self.selected_file}")
         self._generate_worker.start()
@@ -1125,6 +1180,41 @@ class MainWindow(QMainWindow):
             "서식/스타일 경고",
             "출력 파일 생성은 완료하였습니다.\n아래 경고를 확인하고 템플릿 스타일 설정을 점검해 주세요.\n\n" + details,
         )
+
+    def _load_preset_list(self):
+        """config/presets/ 폴더의 프리셋 목록을 콤보박스에 로드."""
+        self.preset_combo.blockSignals(True)
+        self.preset_combo.clear()
+        presets = self.config_manager.list_presets()
+        if not presets:
+            self.preset_combo.addItem("(기본 설정)", "")
+        else:
+            for preset in presets:
+                self.preset_combo.addItem(preset["name"], preset["file"])
+        # 마지막 사용 프리셋 자동 선택
+        active = self.config_manager.get_active_preset()
+        if active:
+            idx = self.preset_combo.findText(active)
+            if idx >= 0:
+                self.preset_combo.setCurrentIndex(idx)
+                preset_file = self.preset_combo.currentData()
+                if preset_file:
+                    self.config_manager.load_with_preset(preset_file)
+                    self.service._refresh_dependencies()
+        self.preset_combo.blockSignals(False)
+
+    def _on_preset_changed(self, index):
+        """프리셋이 변경되면 config를 다시 로드한다."""
+        if index < 0:
+            return
+        preset_file = self.preset_combo.currentData()
+        if preset_file:
+            self.config_manager.load_with_preset(preset_file)
+        else:
+            self.config_manager.reload()
+        preset_name = self.preset_combo.currentText()
+        self.config_manager.set_active_preset(preset_name)
+        self.service._refresh_dependencies()
 
     def applyStyle(self):
         self.setStyleSheet(APP_STYLE)
