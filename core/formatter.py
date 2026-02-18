@@ -604,9 +604,14 @@ class HwpFormatter:
             # 1단계: 각 문단의 텍스트 수집 (PARA_TEXT 파싱)
             para_texts = self._collect_para_texts(body)
             style_char_ids = self._collect_style_char_ids(ole, compressed)
+            style_para_ids = self._collect_style_para_ids(ole, compressed)
             question_char_id = style_char_ids.get(question_idx)
             passage_char_id = style_char_ids.get(passage_idx)
             question_emphasis_char_ids: set[int] = set()
+            question_para_shape_id: int | None = style_para_ids.get(question_idx)
+            passage_para_shape_id: int | None = style_para_ids.get(passage_idx)
+            question_para_shape_offsets: list[int] = []
+            passage_para_shape_offsets: list[int] = []
 
             # 2단계: PARA_HEADER의 style_id 수정
             modified = bytearray(body)
@@ -634,8 +639,35 @@ class HwpFormatter:
                     new_style = self._classify_paragraph_style(
                         text, question_idx, passage_idx,
                     )
+                    para_shape_offset: int | None = data_start + 8 if size >= 10 else None
+                    current_para_shape_id: int | None = None
+                    if para_shape_offset is not None:
+                        try:
+                            current_para_shape_id = int(
+                                struct.unpack_from("<H", modified, para_shape_offset)[0]
+                            )
+                        except Exception:
+                            current_para_shape_id = None
                     active_style_id = new_style
                     active_char_id = question_char_id if new_style == question_idx else passage_char_id
+                    if new_style == question_idx:
+                        if (
+                            question_para_shape_id is None
+                            and current_para_shape_id is not None
+                            and current_para_shape_id > 0
+                        ):
+                            question_para_shape_id = current_para_shape_id
+                        if para_shape_offset is not None:
+                            question_para_shape_offsets.append(para_shape_offset)
+                    else:
+                        if (
+                            passage_para_shape_id is None
+                            and current_para_shape_id is not None
+                            and current_para_shape_id > 0
+                        ):
+                            passage_para_shape_id = current_para_shape_id
+                        if para_shape_offset is not None:
+                            passage_para_shape_offsets.append(para_shape_offset)
                     if new_style == question_idx and text.strip():
                         question_para_hits += 1
                     if modified[data_start + 10] != new_style:
@@ -655,6 +687,11 @@ class HwpFormatter:
                         changed = True
 
                 pos = data_start + size
+
+            if self._rewrite_para_shape_ids(modified, question_para_shape_offsets, question_para_shape_id):
+                changed = True
+            if self._rewrite_para_shape_ids(modified, passage_para_shape_offsets, passage_para_shape_id):
+                changed = True
 
             if question_idx != passage_idx and question_para_hits == 0:
                 self._record_style_warning(
@@ -951,6 +988,41 @@ class HwpFormatter:
         return style_char_ids
 
     @staticmethod
+    def _collect_style_para_ids(
+        ole: "olefile.OleFileIO", compressed: bool,
+    ) -> dict[int, int]:
+        if not ole.exists("DocInfo"):
+            return {}
+        raw = ole.openstream("DocInfo").read()
+        data = zlib.decompress(raw, -15) if compressed else raw
+
+        style_para_ids: dict[int, int] = {}
+        style_index = 0
+        pos = 0
+        while pos + 4 <= len(data):
+            h = struct.unpack_from("<I", data, pos)[0]
+            tag_id = h & 0x3FF
+            size = (h >> 20) & 0xFFF
+            data_start = pos + 4
+            if size == 0xFFF:
+                if data_start + 4 > len(data):
+                    break
+                size = struct.unpack_from("<I", data, data_start)[0]
+                data_start += 4
+            if data_start + size > len(data):
+                break
+
+            if tag_id == TAG_STYLE:
+                payload = data[data_start:data_start + size]
+                para_id = HwpFormatter._parse_style_para_id(payload)
+                if para_id is not None:
+                    style_para_ids[style_index] = para_id
+                style_index += 1
+
+            pos = data_start + size
+        return style_para_ids
+
+    @staticmethod
     def _parse_style_char_id(payload: bytes) -> int | None:
         # STYLE record tail includes ParaShapeId(uint16), CharShapeId(uint16).
         # Layout: [u16 local_len][local][u16 eng_len][eng][tail...]
@@ -969,6 +1041,46 @@ class HwpFormatter:
             return int(struct.unpack_from("<H", tail, 6)[0])
         except Exception:
             return None
+
+    @staticmethod
+    def _parse_style_para_id(payload: bytes) -> int | None:
+        # STYLE record tail includes ParaShapeId(uint16), CharShapeId(uint16).
+        # Layout: [u16 local_len][local][u16 eng_len][eng][tail...]
+        if len(payload) < 4:
+            return None
+        try:
+            local_len = struct.unpack_from("<H", payload, 0)[0]
+            local_end = 2 + local_len * 2
+            if local_end + 2 > len(payload):
+                return None
+            eng_len = struct.unpack_from("<H", payload, local_end)[0]
+            eng_end = local_end + 2 + eng_len * 2
+            tail = payload[eng_end:]
+            if len(tail) < 8:
+                return None
+            return int(struct.unpack_from("<H", tail, 4)[0])
+        except Exception:
+            return None
+
+    @staticmethod
+    def _rewrite_para_shape_ids(
+        buffer: bytearray,
+        offsets: list[int],
+        target_para_shape_id: int | None,
+    ) -> bool:
+        if target_para_shape_id is None or target_para_shape_id <= 0 or not offsets:
+            return False
+        changed = False
+        target = int(target_para_shape_id)
+        for offset in offsets:
+            if offset + 2 > len(buffer):
+                continue
+            current = int(struct.unpack_from("<H", buffer, offset)[0])
+            if current == target:
+                continue
+            struct.pack_into("<H", buffer, offset, target)
+            changed = True
+        return changed
 
     @staticmethod
     def _recompress_to_exact_size(data: bytes, target_size: int) -> bytes | None:
@@ -1193,7 +1305,10 @@ class HwpFormatter:
         """문단 텍스트를 기반으로 적용할 style_id를 결정한다."""
         stripped = text.strip()
         if not stripped:
-            return 0  # 빈 문단 → 바탕글
+            # Empty paragraphs often appear around table controls.
+            # Keep them on passage style so table text does not fall back to
+            # template base para-shape (for example 160% line spacing).
+            return passage_idx
         candidate = stripped.lstrip("\ufeff\u200b\u2060\xa0")
         if self._QUESTION_NUMBER_RE.match(candidate):
             return question_idx

@@ -78,7 +78,7 @@ class GeneratorSubItemsTablePolicyTestCase(unittest.TestCase):
         generator._insert_sub_items_block(object(), ["a", "b"], question_number=1, prefer_table=True)
 
         self.assertEqual(call_order, ["move"])
-        self.assertEqual(inserted, ["a\r\nb", "\r\n"])
+        self.assertEqual(inserted, ["a", "\r\n", "b", "\r\n"])
 
     def test_table_followed_by_choices_skips_extra_newline(self) -> None:
         generator = _make_generator(True)
@@ -99,7 +99,48 @@ class GeneratorSubItemsTablePolicyTestCase(unittest.TestCase):
             prefer_table=True,
             has_following_choices=True,
         )
-        self.assertEqual(inserted, ["a\r\nb"])
+        self.assertEqual(inserted, ["a", "\r\n", "b"])
+
+    def test_table_applies_sub_item_style_per_line(self) -> None:
+        generator = _make_generator(True)
+        style_hits: list[str] = []
+        generator.formatter.apply_sub_items_format = lambda hwp: style_hits.append("hit")
+        generator._create_single_cell_sub_items_table = lambda hwp: True
+        generator._set_current_table_treat_as_char = lambda hwp: True
+        generator._leave_table_context = lambda hwp: True
+        generator._force_table_context_cleanup = lambda hwp: None
+        generator._move_caret_past_recent_table = lambda hwp: None
+        generator._insert_text = lambda hwp, text: None
+
+        generator._insert_sub_items_block(
+            object(),
+            ["line1", "line2", "line3", "line4"],
+            question_number=1,
+            prefer_table=True,
+            has_following_choices=True,
+        )
+        self.assertGreaterEqual(len(style_hits), 4)
+
+    def test_table_runs_cell_wide_sub_item_format_pass(self) -> None:
+        generator = _make_generator(True)
+        calls: list[str] = []
+        generator.formatter.apply_sub_items_format = lambda hwp: calls.append("style")
+
+        class _HwpStub:
+            class _Action:
+                @staticmethod
+                def Run(name: str) -> bool:
+                    calls.append(name)
+                    return True
+
+            HAction = _Action()
+
+        generator._apply_sub_items_format_to_current_table_cell(_HwpStub())
+
+        self.assertIn("TableCellBlock", calls)
+        self.assertIn("TableCellBlockExtend", calls)
+        self.assertIn("style", calls)
+        self.assertIn("Cancel", calls)
 
     def test_inline_choice_spacing_is_fixed_to_nine_spaces(self) -> None:
         generator = _make_generator(True)

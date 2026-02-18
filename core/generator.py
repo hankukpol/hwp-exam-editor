@@ -871,9 +871,9 @@ class OutputGenerator:
             self._set_current_table_treat_as_char(hwp)
 
             self._heartbeat("소문항: 스타일 적용")
-            self.formatter.apply_sub_items_format(hwp)
             self._heartbeat("소문항: 텍스트 입력")
-            self._insert_text(hwp, "\r\n".join(sub_items))
+            self._insert_sub_items_lines_in_table(hwp, sub_items)
+            self._apply_sub_items_format_to_current_table_cell(hwp)
             self._set_current_table_treat_as_char(hwp)
 
             # CloseEx is the reliable way to exit table editing in HWP 2014.
@@ -891,6 +891,31 @@ class OutputGenerator:
             self.formatter.apply_sub_items_format(hwp)
             for item in sub_items:
                 self._insert_text(hwp, f"{item}\r\n")
+
+    def _insert_sub_items_lines_in_table(self, hwp, sub_items: list[str]) -> None:
+        for index, item in enumerate(sub_items):
+            # Table cell paragraphs can revert to the cell-default para shape
+            # on each newline, so apply style per line.
+            self.formatter.apply_sub_items_format(hwp)
+            self._insert_text(hwp, item)
+            if index + 1 < len(sub_items):
+                self._insert_text(hwp, "\r\n")
+
+    def _apply_sub_items_format_to_current_table_cell(self, hwp) -> None:
+        # After text insertion, normalize the entire current cell once more.
+        # This forces a consistent para shape (line spacing/indent) across all
+        # lines in the table cell.
+        try:
+            hwp.HAction.Run("TableCellBlock")
+            hwp.HAction.Run("TableCellBlockExtend")
+            self.formatter.apply_sub_items_format(hwp)
+        except Exception:
+            return
+        finally:
+            try:
+                hwp.HAction.Run("Cancel")
+            except Exception:
+                pass
 
     def _normalize_inline_choice_spacing(self, choice: str) -> str:
         text = (choice or "").strip()

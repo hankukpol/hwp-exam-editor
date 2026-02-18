@@ -45,8 +45,8 @@ class FormatterQuestionStyleClassificationTestCase(unittest.TestCase):
     def test_non_question_line_is_passage_style(self) -> None:
         self.assertEqual(self.formatter._classify_paragraph_style("passage text", 7, 9), 9)
 
-    def test_empty_line_is_base_style(self) -> None:
-        self.assertEqual(self.formatter._classify_paragraph_style("   ", 7, 9), 0)
+    def test_empty_line_is_passage_style(self) -> None:
+        self.assertEqual(self.formatter._classify_paragraph_style("   ", 7, 9), 9)
 
     def test_para_char_shape_run_count(self) -> None:
         # one run(8 bytes)
@@ -81,6 +81,29 @@ class FormatterQuestionStyleClassificationTestCase(unittest.TestCase):
         self.assertEqual(formatter_module.struct.unpack_from("<I", buf, 4)[0], 300)
         self.assertEqual(formatter_module.struct.unpack_from("<I", buf, 12)[0], 200)
         self.assertEqual(formatter_module.struct.unpack_from("<I", buf, 20)[0], 300)
+
+    def test_parse_style_para_id_extracts_tail_value(self) -> None:
+        local = "A".encode("utf-16le")
+        payload = (
+            formatter_module.struct.pack("<H", 1)
+            + local
+            + formatter_module.struct.pack("<H", 0)
+            + b"\x00\x00\x00\x00"
+            + formatter_module.struct.pack("<H", 321)
+            + formatter_module.struct.pack("<H", 654)
+            + b"\x00\x00"
+        )
+        self.assertEqual(self.formatter._parse_style_para_id(payload), 321)
+        self.assertEqual(self.formatter._parse_style_char_id(payload), 654)
+
+    def test_rewrite_para_shape_ids_updates_target_offsets(self) -> None:
+        buf = bytearray(32)
+        formatter_module.struct.pack_into("<H", buf, 8, 0)
+        formatter_module.struct.pack_into("<H", buf, 12, 1)
+        changed = self.formatter._rewrite_para_shape_ids(buf, [8, 12], 3)
+        self.assertTrue(changed)
+        self.assertEqual(formatter_module.struct.unpack_from("<H", buf, 8)[0], 3)
+        self.assertEqual(formatter_module.struct.unpack_from("<H", buf, 12)[0], 3)
 
     def test_missing_question_style_falls_back_with_warning(self) -> None:
         if formatter_module.olefile is None:
