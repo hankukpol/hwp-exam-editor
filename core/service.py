@@ -5,6 +5,7 @@ import re
 from typing import Callable, Optional
 
 from .config_manager import ConfigManager
+from .detector import extract_question_number
 from .exceptions import ParseError
 from .generator import OutputGenerator
 from .hwp_controller import HwpController
@@ -40,7 +41,7 @@ class ExamProcessingService:
                 raise ParseError(
                     "문제 본문이 없는 정답표 형식 파일로 보입니다. 문제지가 포함된 원본 파일을 선택해주세요."
                 )
-            raise ParseError("문제 번호를 찾지 못했습니다. 파싱 패턴을 확인해주세요.")
+            raise ParseError(self._build_parse_diagnostic_message(text_blocks))
         return document
 
     def generate_outputs(
@@ -70,3 +71,24 @@ class ExamProcessingService:
         )
         question_like = sum(1 for line in text_blocks if re.search(r"[?？]", line))
         return number_only >= 10 and answer_only >= 10 and question_like == 0
+
+    def _build_parse_diagnostic_message(self, text_blocks: list[str]) -> str:
+        non_empty = [line.strip() for line in text_blocks if line and line.strip()]
+        probe_lines = non_empty[:20]
+        match_count = 0
+        for line in probe_lines:
+            if extract_question_number(line, self.parser.question_patterns) is not None:
+                match_count += 1
+
+        sample = non_empty[:5]
+        sample_text = "\n".join(f"- {line[:80]}" for line in sample) if sample else "- (샘플 없음)"
+        return (
+            "문제 번호를 찾지 못했습니다.\n"
+            f"인식 점검: 앞 {len(probe_lines)}줄 중 문제번호 패턴 일치 {match_count}개\n\n"
+            "파일 앞부분 샘플:\n"
+            f"{sample_text}\n\n"
+            "확인사항:\n"
+            "- 문제 시작 줄이 '1.' 또는 '01)' 형식인지 확인해 주세요.\n"
+            "- 번호 앞에 특수기호/표 컨트롤 문자가 붙어 있지 않은지 확인해 주세요.\n"
+            "- 스캔/PDF 변환본이면 원본 HWP로 다시 시도해 주세요."
+        )

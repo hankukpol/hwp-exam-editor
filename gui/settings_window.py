@@ -1,3 +1,5 @@
+import json
+
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                              QLineEdit, QPushButton, QFormLayout, QGroupBox,
                              QComboBox, QDoubleSpinBox, QSpinBox, QTabWidget,
@@ -178,9 +180,13 @@ class SettingsWindow(QDialog):
 
         # 하단 버튼
         btn_layout = QHBoxLayout()
+        self.export_btn = QPushButton("설정 내보내기")
+        self.import_btn = QPushButton("설정 가져오기")
         self.save_btn = QPushButton("저장")
         self.save_btn.setStyleSheet("background-color: #1a237e; color: white;")
         self.cancel_btn = QPushButton("취소")
+        btn_layout.addWidget(self.export_btn)
+        btn_layout.addWidget(self.import_btn)
         btn_layout.addStretch()
         btn_layout.addWidget(self.save_btn)
         btn_layout.addWidget(self.cancel_btn)
@@ -190,6 +196,8 @@ class SettingsWindow(QDialog):
         self.style_template_btn.clicked.connect(self.pickStyleTemplateFile)
         self.module_dll_btn.clicked.connect(self.pickModuleDllFile)
         self.style_enabled_check.toggled.connect(self.setStyleControlsEnabled)
+        self.export_btn.clicked.connect(self.exportConfig)
+        self.import_btn.clicked.connect(self.importConfig)
         self.save_btn.clicked.connect(self.saveConfig)
         self.cancel_btn.clicked.connect(self.reject)
         self.setStyleControlsEnabled(self.style_enabled_check.isChecked())
@@ -291,6 +299,46 @@ class SettingsWindow(QDialog):
         self.choice_style_edit.setEnabled(enabled)
         self.sub_items_style_edit.setEnabled(enabled)
         self.explanation_style_edit.setEnabled(enabled)
+
+    def exportConfig(self):
+        target_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "설정 내보내기",
+            "hwp_exam_editor_settings.json",
+            "JSON Files (*.json);;All Files (*)",
+        )
+        if not target_path:
+            return
+
+        try:
+            config = self.config_manager.all()
+            with open(target_path, "w", encoding="utf-8") as file:
+                json.dump(config, file, ensure_ascii=False, indent=2)
+            QMessageBox.information(self, "내보내기 완료", f"설정을 저장했습니다.\n{target_path}")
+        except Exception as exc:
+            QMessageBox.warning(self, "내보내기 실패", f"설정 파일 저장에 실패했습니다.\n{exc}")
+
+    def importConfig(self):
+        source_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "설정 가져오기",
+            "",
+            "JSON Files (*.json);;All Files (*)",
+        )
+        if not source_path:
+            return
+
+        try:
+            with open(source_path, "r", encoding="utf-8") as file:
+                payload = json.load(file)
+            if not isinstance(payload, dict):
+                raise ValueError("루트 JSON 객체는 딕셔너리여야 합니다.")
+
+            self.config_manager.update(payload)
+            self.loadConfig()
+            QMessageBox.information(self, "가져오기 완료", "설정을 불러와 화면에 반영했습니다.")
+        except Exception as exc:
+            QMessageBox.warning(self, "가져오기 실패", f"설정 파일을 읽지 못했습니다.\n{exc}")
 
     def saveConfig(self):
         template_path = self.style_template_edit.text().strip()

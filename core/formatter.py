@@ -274,7 +274,8 @@ class HwpFormatter:
             _safe_set_attr(page, "GutterType", 0)
 
             hwp.HAction.Execute("PageSetup", hwp.HParameterSet.HSecDef.HSet)
-        except Exception:
+        except Exception as exc:
+            self._record_style_warning(f"페이지 설정 적용 실패: {type(exc).__name__}: {exc}")
             return
 
     def setup_columns(self, hwp: Any) -> None:
@@ -289,7 +290,8 @@ class HwpFormatter:
             _safe_set_attr(col, "SameSize", 1)
             _safe_set_attr(col, "SameGap", hwp.MiliToHwpUnit(8.0))
             hwp.HAction.Execute("MultiColumn", hwp.HParameterSet.HColDef.HSet)
-        except Exception:
+        except Exception as exc:
+            self._record_style_warning(f"다단 설정 적용 실패: {type(exc).__name__}: {exc}")
             return
 
     def apply_question_format(self, hwp: Any, emphasize: bool = False) -> None:
@@ -362,7 +364,8 @@ class HwpFormatter:
             _safe_set_attr(ps, "SnapToGrid", 1 if self.paragraph_config.get("use_grid", True) else 0)
             hwp.HAction.Execute("ParaShape", hwp.HParameterSet.HParaShape.HSet)
             hwp.HAction.Run("ParagraphShapeAlignJustify")
-        except Exception:
+        except Exception as exc:
+            self._record_style_warning(f"문단 서식 적용 실패: {type(exc).__name__}: {exc}")
             return
 
     def _apply_char_shape(
@@ -450,7 +453,8 @@ class HwpFormatter:
                 hwp.HAction.Execute("CharShape", hwp.HParameterSet.HCharShape.HSet)
                 if idx == len(candidates) - 1 or self._current_hangul_face_matches(hwp, candidate_font):
                     break
-        except Exception:
+        except Exception as exc:
+            self._record_style_warning(f"글자 모양 적용 실패({font_name}): {type(exc).__name__}: {exc}")
             return
 
     def _font_candidates(self, font_name: str) -> list[str]:
@@ -526,7 +530,8 @@ class HwpFormatter:
                 hwp.HAction.Execute("CharShape", hwp.HParameterSet.HCharShape.HSet)
                 if idx == len(candidates) - 1 or self._current_hangul_face_matches(hwp, candidate_font):
                     break
-        except Exception:
+        except Exception as exc:
+            self._record_style_warning(f"글꼴 Face 적용 실패({font_name}): {type(exc).__name__}: {exc}")
             return
 
     # ── 바이너리 후처리: 저장된 HWP 파일의 style_id 설정 ──────────
@@ -551,7 +556,8 @@ class HwpFormatter:
             # Fallback: keep inline-emphasis face consistent even when style ids are unavailable.
             try:
                 return self.post_process_question_emphasis_faces(file_path)
-            except Exception:
+            except Exception as exc:
+                self._record_style_warning(f"강조 폰트 후처리 실패: {type(exc).__name__}: {exc}")
                 return False
         if question_idx is None:
             fallback = passage_idx if passage_idx is not None else 0
@@ -576,10 +582,11 @@ class HwpFormatter:
             # Safety pass: some HWP builds keep zero-face inline charshapes.
             try:
                 self.post_process_question_emphasis_faces(file_path)
-            except Exception:
-                pass
+            except Exception as exc:
+                self._record_style_warning(f"강조 폰트 안전 후처리 실패: {type(exc).__name__}: {exc}")
             return result
-        except Exception:
+        except Exception as exc:
+            self._record_style_warning(f"스타일 후처리 실패: {type(exc).__name__}: {exc}")
             return False
 
     def _rewrite_style_ids(

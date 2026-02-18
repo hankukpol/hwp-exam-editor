@@ -113,10 +113,10 @@ class PreviewWindow(QDialog):
         self.answer_edit.setPlainText(question.answer or "")
         self.explanation_edit.setPlainText(question.explanation or "")
 
-    def saveCurrentQuestion(self, show_message: bool = True):
+    def saveCurrentQuestion(self, show_message: bool = True) -> bool:
         index = self.current_index
         if index < 0 or index >= len(self.exam_document.questions):
-            return
+            return False
 
         question = self.exam_document.questions[index]
         edited_lines = [
@@ -137,7 +137,17 @@ class PreviewWindow(QDialog):
             else:
                 body.append(stripped)
 
-        question.question_text = "\n".join(body).strip()
+        question_text = "\n".join(body).strip()
+        if not question_text:
+            QMessageBox.warning(
+                self,
+                "저장 실패",
+                "문제 본문이 비어 있습니다.\n문제 제목/질문 문장을 입력한 뒤 저장해 주세요.",
+            )
+            self.question_edit.setFocus()
+            return False
+
+        question.question_text = question_text
         question.choices = choices
         question.sub_items = sub_items
         question.answer = self.answer_edit.toPlainText().strip() or None
@@ -147,10 +157,11 @@ class PreviewWindow(QDialog):
         self.list_widget.setCurrentRow(index)
         if show_message:
             QMessageBox.information(self, "저장 완료", "현재 문항 변경사항을 저장했습니다.")
+        return True
 
     def convertAndClose(self):
-        self.saveCurrentQuestion(show_message=False)
-        self.accept()
+        if self.saveCurrentQuestion(show_message=False):
+            self.accept()
 
     def applyStyle(self):
         style = """

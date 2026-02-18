@@ -9,12 +9,13 @@ import time
 import uuid
 from pathlib import Path
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-                             QLabel, QPushButton, QFileDialog, QProgressBar,
-                             QFrame, QAction, QMessageBox, QApplication)
-from PyQt5.QtCore import Qt, pyqtSignal, QThread, QTimer
-from PyQt5.QtGui import QIcon
+                              QLabel, QPushButton, QFileDialog, QProgressBar,
+                              QFrame, QAction, QMessageBox, QApplication)
+from PyQt5.QtCore import Qt, pyqtSignal, QThread, QTimer, QUrl
+from PyQt5.QtGui import QIcon, QDesktopServices
 
 from core.config_manager import ConfigManager
+from core.error_messages import build_generation_error_message, build_parse_error_message
 from core.exceptions import ProcessingError
 from core.models import ExamDocument
 from core.service import ExamProcessingService
@@ -46,6 +47,10 @@ def _document_to_payload(document: ExamDocument) -> dict:
     }
 
 
+def _log_swallowed_exception(context: str, exc: Exception) -> None:
+    _append_generation_log(f"{context} | {type(exc).__name__}: {exc}")
+
+
 def _is_windowsapps_python(path: Path) -> bool:
     text = str(path).lower()
     return "windowsapps" in text and path.name.lower().startswith("python")
@@ -61,8 +66,8 @@ def _resolve_python_executable() -> str:
         install_root = Path.home() / "AppData" / "Local" / "Programs" / "Python"
         if install_root.exists():
             candidates.extend(sorted(install_root.glob("Python*/python.exe"), reverse=True))
-    except Exception:
-        pass
+    except Exception as exc:
+        _log_swallowed_exception("resolve_python_executable", exc)
 
     seen: set[str] = set()
     for candidate in candidates:
@@ -86,7 +91,8 @@ def _create_worker_temp_dir() -> Path:
     for root in roots:
         try:
             root.mkdir(parents=True, exist_ok=True)
-        except Exception:
+        except Exception as exc:
+            _log_swallowed_exception(f"create_worker_temp_dir mkdir failed: {root}", exc)
             continue
 
         for _ in range(8):
@@ -97,7 +103,8 @@ def _create_worker_temp_dir() -> Path:
                 probe.write_text("ok", encoding="utf-8")
                 probe.unlink(missing_ok=True)
                 return candidate
-            except Exception:
+            except Exception as exc:
+                _log_swallowed_exception(f"create_worker_temp_dir candidate failed: {candidate}", exc)
                 shutil.rmtree(candidate, ignore_errors=True)
                 continue
 
@@ -163,7 +170,8 @@ def _get_hwp_pids(terminable_only: bool = False) -> set[int]:
                         continue
                     pids.add(pid)
         return pids
-    except Exception:
+    except Exception as exc:
+        _log_swallowed_exception("get_hwp_pids", exc)
         return set()
 
 
@@ -182,8 +190,8 @@ def _kill_hwp_pids(pids: set[int]) -> None:
                 capture_output=True, timeout=5,
                 creationflags=creationflags,
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_swallowed_exception(f"kill_hwp_pids pid={pid}", exc)
 
 
 def _kill_orphaned_hwp(pids_before: set[int]) -> None:
@@ -220,11 +228,11 @@ def _kill_all_hwp() -> None:
 
 
 def _cleanup_stale_runtime_tmp() -> None:
-    """10분 이상 경과한 hwp_gen_* 임시 디렉터리를 삭제한다."""
+    """3분 이상 경과한 hwp_gen_* 임시 디렉터리를 삭제한다."""
     runtime_tmp = Path.cwd() / ".runtime_tmp"
     if not runtime_tmp.exists():
         return
-    stale_threshold = 600  # 10분
+    stale_threshold = 180  # 3분
     now = time.time()
     try:
         for entry in runtime_tmp.iterdir():
@@ -233,10 +241,10 @@ def _cleanup_stale_runtime_tmp() -> None:
             try:
                 if (now - entry.stat().st_mtime) > stale_threshold:
                     shutil.rmtree(entry, ignore_errors=True)
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as exc:
+                _log_swallowed_exception(f"cleanup_stale_runtime_tmp entry={entry}", exc)
+    except Exception as exc:
+        _log_swallowed_exception("cleanup_stale_runtime_tmp", exc)
 
 
 def _append_generation_log(message: str) -> None:
@@ -323,15 +331,16 @@ class GenerationWorker(QThread):
             return
         try:
             proc.terminate()
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_swallowed_exception("worker terminate_process terminate", exc)
         try:
             proc.wait(timeout=3)
-        except Exception:
+        except Exception as exc:
+            _log_swallowed_exception("worker terminate_process wait", exc)
             try:
                 proc.kill()
-            except Exception:
-                pass
+            except Exception as kill_exc:
+                _log_swallowed_exception("worker terminate_process kill", kill_exc)
 
     def _run_subprocess_attempt(
         self,
@@ -350,8 +359,8 @@ class GenerationWorker(QThread):
         try:
             result_path.unlink(missing_ok=True)
             progress_path.unlink(missing_ok=True)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_swallowed_exception("worker cleanup old result/progress", exc)
 
         if getattr(sys, "frozen", False):
             cmd = [
@@ -607,8 +616,8 @@ class GenerationWorker(QThread):
             _kill_orphaned_hwp(hwp_pids_before)
             try:
                 shutil.rmtree(temp_dir, ignore_errors=True)
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_swallowed_exception(f"worker temp_dir cleanup failed: {temp_dir}", exc)
 
     def _read_progress(self, progress_path: Path) -> None:
         """progress.txt 파일을 읽어 progress 시그널을 발행한다."""
@@ -626,8 +635,8 @@ class GenerationWorker(QThread):
             self._last_progress_pct = pct
             self._last_progress_msg = msg
             self.progress.emit(pct, msg)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_swallowed_exception("worker read_progress parse failed", exc)
     @staticmethod
     def _is_rpc_unavailable_error(message: str) -> bool:
         text = (message or "").lower()
@@ -637,6 +646,95 @@ class GenerationWorker(QThread):
             or "서버를 사용할 수 없습니다" in text
             or "rpc server is unavailable" in text
         )
+
+
+class BatchGenerationWorker(QThread):
+    progress = pyqtSignal(int, str)
+    completed = pyqtSignal(list, list)
+
+    def __init__(self, file_paths: list[str], timeout_sec: int = 60, style_required: bool = False):
+        super().__init__()
+        self.file_paths = list(file_paths)
+        self.timeout_sec = timeout_sec
+        self.style_required = style_required
+
+    def run(self):
+        total = len(self.file_paths)
+        if total <= 0:
+            self.completed.emit([], [])
+            return
+
+        service = ExamProcessingService(ConfigManager())
+        successes: list[dict] = []
+        failures: list[dict] = []
+
+        for index, file_path in enumerate(self.file_paths, start=1):
+            if self.isInterruptionRequested():
+                failures.append(
+                    {
+                        "file": file_path,
+                        "error": "사용자 요청으로 일괄 처리를 중단했습니다.",
+                    }
+                )
+                continue
+
+            base_pct = int(((index - 1) / total) * 100)
+            self.progress.emit(base_pct, f"[{index}/{total}] 분석 중: {os.path.basename(file_path)}")
+
+            try:
+                document = service.parse_file(file_path)
+            except ProcessingError as exc:
+                failures.append(
+                    {
+                        "file": file_path,
+                        "error": build_parse_error_message(str(exc)),
+                    }
+                )
+                continue
+
+            holder: dict[str, object] = {}
+            worker = GenerationWorker(
+                document=document,
+                source_file=file_path,
+                timeout_sec=self.timeout_sec,
+                style_required=self.style_required,
+            )
+            worker.progress.connect(
+                lambda pct, msg, idx=index, count=total: self.progress.emit(
+                    min(99, int(((idx - 1) / count) * 100) + int(pct / count)),
+                    f"[{idx}/{count}] {msg}",
+                )
+            )
+            worker.succeeded.connect(
+                lambda files, warning: holder.update(
+                    {
+                        "ok": True,
+                        "files": list(files),
+                        "warning": str(warning or ""),
+                    }
+                )
+            )
+            worker.failed.connect(lambda error_text: holder.update({"ok": False, "error": str(error_text)}))
+            worker.run()
+
+            if bool(holder.get("ok")):
+                successes.append(
+                    {
+                        "file": file_path,
+                        "outputs": list(holder.get("files", [])),
+                        "warning": str(holder.get("warning", "")),
+                    }
+                )
+            else:
+                failures.append(
+                    {
+                        "file": file_path,
+                        "error": build_generation_error_message(str(holder.get("error", "알 수 없는 오류"))),
+                    }
+                )
+
+        self.progress.emit(100, "일괄 처리 완료")
+        self.completed.emit(successes, failures)
 
 
 class MainWindow(QMainWindow):
@@ -651,8 +749,10 @@ class MainWindow(QMainWindow):
         self.config_manager = ConfigManager()
         self.service = ExamProcessingService(self.config_manager)
         self.selected_file = ""
+        self.last_output_dir = ""
         self.current_document: ExamDocument | None = None
         self._generate_worker: GenerationWorker | None = None
+        self._batch_worker: BatchGenerationWorker | None = None
         self._generation_guard_timer = QTimer(self)
         self._generation_guard_timer.setSingleShot(True)
         self._generation_guard_timer.timeout.connect(self._on_generation_guard_timeout)
@@ -663,11 +763,11 @@ class MainWindow(QMainWindow):
 
     def initUI(self):
         menu_bar = self.menuBar()
-        settings_action = QAction("설정", self)
-        settings_action.triggered.connect(self.showSettings)
+        self.settings_action = QAction("설정", self)
+        self.settings_action.triggered.connect(self.showSettings)
         help_action = QAction("안내", self)
         help_action.triggered.connect(self.showHelp)
-        menu_bar.addAction(settings_action)
+        menu_bar.addAction(self.settings_action)
         menu_bar.addAction(help_action)
 
         central_widget = QWidget()
@@ -712,9 +812,16 @@ class MainWindow(QMainWindow):
         self.process_btn.setObjectName("PrimaryBtn")
         self.process_btn.setEnabled(False)
         self.process_btn.clicked.connect(self.startProcessing)
+        self.batch_btn = QPushButton("일괄 생성")
+        self.batch_btn.clicked.connect(self.startBatchProcessing)
+        self.open_output_btn = QPushButton("결과 폴더 열기")
+        self.open_output_btn.setEnabled(False)
+        self.open_output_btn.clicked.connect(self.openOutputFolder)
 
         btn_layout.addWidget(self.preview_btn)
         btn_layout.addWidget(self.process_btn)
+        btn_layout.addWidget(self.batch_btn)
+        btn_layout.addWidget(self.open_output_btn)
         main_layout.addLayout(btn_layout)
 
         notice_label = QLabel("※ 헤더(동원명) 수정 등은 생성하지 않습니다.\n   1번 문제부터 편집하며 헤더는 직접 수정이 필요합니다.")
@@ -722,6 +829,12 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(notice_label)
 
     def handleFileSelect(self, file_path):
+        if (self._generate_worker and self._generate_worker.isRunning()) or (
+            self._batch_worker and self._batch_worker.isRunning()
+        ):
+            QMessageBox.information(self, "안내", "생성 작업이 진행 중일 때는 파일을 변경할 수 없습니다.")
+            return
+
         if file_path == "SELECT_FILE":
             options = QFileDialog.Options()
             file_path, _ = QFileDialog.getOpenFileName(
@@ -767,8 +880,9 @@ class MainWindow(QMainWindow):
             self.current_document = None
             self.preview_btn.setEnabled(False)
             self.process_btn.setEnabled(False)
+            self.open_output_btn.setEnabled(False)
             self.status_label.setText("분석 실패")
-            QMessageBox.warning(self, "분석 실패", str(exc))
+            QMessageBox.warning(self, "분석 실패", build_parse_error_message(str(exc)))
         finally:
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(0)
@@ -787,6 +901,11 @@ class MainWindow(QMainWindow):
             )
 
     def showSettings(self):
+        if (self._generate_worker and self._generate_worker.isRunning()) or (
+            self._batch_worker and self._batch_worker.isRunning()
+        ):
+            QMessageBox.information(self, "안내", "출력 생성 중에는 설정을 변경할 수 없습니다.")
+            return
         settings = SettingsWindow(self.config_manager, self)
         if settings.exec_():
             self.service.reload_config()
@@ -802,12 +921,113 @@ class MainWindow(QMainWindow):
             "참고: HWP 생성 환경이 없으면 텍스트(.txt)로 대체 저장될 수 있습니다.",
         )
 
+    def openOutputFolder(self):
+        output_dir = (self.last_output_dir or "").strip()
+        if not output_dir or not Path(output_dir).exists():
+            QMessageBox.information(self, "안내", "먼저 출력 파일을 생성해 주세요.")
+            return
+
+        try:
+            if os.name == "nt":
+                os.startfile(output_dir)  # type: ignore[attr-defined]
+            else:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(output_dir))
+        except Exception as exc:
+            QMessageBox.warning(self, "폴더 열기 실패", f"결과 폴더를 열지 못했습니다.\n{exc}")
+
+    def startBatchProcessing(self):
+        if self._generate_worker and self._generate_worker.isRunning():
+            QMessageBox.information(self, "안내", "현재 단건 생성이 진행 중입니다.")
+            return
+        if self._batch_worker and self._batch_worker.isRunning():
+            QMessageBox.information(self, "안내", "이미 일괄 생성이 진행 중입니다.")
+            return
+
+        files, _ = QFileDialog.getOpenFileNames(
+            self,
+            "일괄 생성할 파일 선택",
+            "",
+            "HWP Files (*.hwp);;Text Files (*.txt);;All Files (*)",
+        )
+        if not files:
+            return
+
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.status_label.setText(f"일괄 생성 시작: {len(files)}개 파일")
+        QApplication.processEvents()
+
+        self.preview_btn.setEnabled(False)
+        self.process_btn.setEnabled(False)
+        self.batch_btn.setEnabled(False)
+        self.open_output_btn.setEnabled(False)
+        self.settings_action.setEnabled(False)
+
+        style_enabled = bool(self.config_manager.get("style.enabled", True))
+        self._batch_worker = BatchGenerationWorker(
+            file_paths=files,
+            timeout_sec=60,
+            style_required=style_enabled,
+        )
+        self._batch_worker.progress.connect(self._on_batch_progress)
+        self._batch_worker.completed.connect(self._on_batch_completed)
+        self._batch_worker.finished.connect(self._on_batch_finished)
+        self._batch_worker.start()
+
+    def _on_batch_progress(self, pct: int, msg: str):
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(max(0, min(100, int(pct))))
+        self.status_label.setText(f"일괄 생성 중.. {pct}% - {msg}")
+
+    def _on_batch_completed(self, successes: list, failures: list):
+        success_count = len(successes)
+        failure_count = len(failures)
+
+        if successes:
+            last_outputs = list(successes[-1].get("outputs", []))
+            if last_outputs:
+                self.last_output_dir = str(Path(last_outputs[0]).parent)
+                self.open_output_btn.setEnabled(True)
+
+        summary_lines = [
+            f"일괄 생성 완료: 성공 {success_count}건 / 실패 {failure_count}건",
+        ]
+        if failures:
+            summary_lines.append("")
+            summary_lines.append("[실패 목록]")
+            for item in failures[:10]:
+                file_name = os.path.basename(str(item.get("file", "")))
+                error_text = str(item.get("error", "")).splitlines()[0] if item.get("error") else "알 수 없는 오류"
+                summary_lines.append(f"- {file_name}: {error_text[:120]}")
+            if failure_count > 10:
+                summary_lines.append(f"... 외 {failure_count - 10}건")
+
+        self.status_label.setText(
+            f"일괄 생성 완료: 성공 {success_count}건 / 실패 {failure_count}건"
+        )
+        QMessageBox.information(self, "일괄 생성 결과", "\n".join(summary_lines))
+
+    def _on_batch_finished(self):
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setVisible(False)
+        self.settings_action.setEnabled(True)
+        self.batch_btn.setEnabled(True)
+        if self.current_document:
+            self.preview_btn.setEnabled(True)
+            self.process_btn.setEnabled(True)
+        self._batch_worker = None
+
     def startProcessing(self):
         if not self.current_document or not self.selected_file:
             QMessageBox.information(self, "안내", "먼저 파일을 선택해 분석을 완료해주세요.")
             return
         if self._generate_worker and self._generate_worker.isRunning():
             QMessageBox.information(self, "안내", "현재 출력 파일 생성이 진행 중입니다.")
+            return
+        if self._batch_worker and self._batch_worker.isRunning():
+            QMessageBox.information(self, "안내", "현재 일괄 생성이 진행 중입니다.")
             return
 
         self.progress_bar.setVisible(True)
@@ -816,6 +1036,9 @@ class MainWindow(QMainWindow):
         QApplication.processEvents()
         self.preview_btn.setEnabled(False)
         self.process_btn.setEnabled(False)
+        self.batch_btn.setEnabled(False)
+        self.open_output_btn.setEnabled(False)
+        self.settings_action.setEnabled(False)
 
         style_enabled = bool(self.config_manager.get("style.enabled", True))
         timeout_sec = 60
@@ -839,6 +1062,8 @@ class MainWindow(QMainWindow):
     def _on_generation_succeeded(self, output_files: list[str], warning: str):
         self.service.last_warning = warning
         output_dir = str(Path(output_files[0]).parent) if output_files else "(없음)"
+        self.last_output_dir = output_dir if output_files else ""
+        self.open_output_btn.setEnabled(bool(output_files))
         warning_text = (warning or "").strip()
         status_suffix = " | 경고 있음" if warning_text else ""
         self.status_label.setText(
@@ -863,7 +1088,8 @@ class MainWindow(QMainWindow):
 
     def _on_generation_failed(self, error_message: str):
         self.status_label.setText("출력 생성 실패")
-        QMessageBox.warning(self, "생성 실패", error_message)
+        self.open_output_btn.setEnabled(False)
+        QMessageBox.warning(self, "생성 실패", build_generation_error_message(error_message))
 
     def _on_generation_progress(self, pct: int, msg: str):
         self.progress_bar.setRange(0, 100)
@@ -874,6 +1100,8 @@ class MainWindow(QMainWindow):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(False)
+        self.settings_action.setEnabled(True)
+        self.batch_btn.setEnabled(True)
         if self.current_document:
             self.preview_btn.setEnabled(True)
             self.process_btn.setEnabled(True)
