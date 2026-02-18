@@ -1,0 +1,270 @@
+
+/* 
+    Modern Flat UI Style Sheet 
+    - No shadows, minimal borders, clean typography.
+    - Primary Color: #1A73E8 (Google Blue)
+    - Background: #F8F9FA
+    - Text: #202124
+*/
+
+/* ── Global Widget Defaults ── */
+QWidget {
+    background-color: #F8F9FA;
+    color: #202124;
+    font-family: "Malgun Gothic", "Segoe UI", sans-serif;
+    font-size: 10pt;
+}
+
+/* ── Main Window & Dialogs ── */
+QMainWindow, QDialog {
+    background-color: #F8F9FA;
+}
+
+/* ── Labels ── */
+QLabel {
+    background-color: transparent;
+    color: #202124;
+}
+
+/* ── Buttons (Flat & Modern) ── */
+QPushButton {
+    background-color: #FFFFFF;
+    border: 1px solid #DADCE0;
+    border-radius: 4px;
+    padding: 6px 16px;
+    color: #3C4043;
+    font-weight: bold;
+}
+
+QPushButton:hover {
+    background-color: #F1F3F4;
+    border: 1px solid #DADCE0;
+}
+
+QPushButton:pressed {
+    background-color: #E8EAED;
+    border: 1px solid #DADCE0;
+}
+
+QPushButton:disabled {
+    background-color: #F1F3F4;
+    color: #BDC1C6;
+    border: 1px solid #F1F3F4;
+}
+
+/* Primary Action Button (Blue) */
+QPushButton[class="primary"] {
+    background-color: #1A73E8;
+    color: #FFFFFF;
+    border: 1px solid #1A73E8;
+}
+
+QPushButton[class="primary"]:hover {
+    background-color: #185ABC;
+    border: 1px solid #185ABC;
+}
+
+QPushButton[class="primary"]:pressed {
+    background-color: #174EA6;
+    border: 1px solid #174EA6;
+}
+
+QPushButton[class="primary"]:disabled {
+    background-color: #8AB4F8;
+    color: #FFFFFF;
+    border: 1px solid #8AB4F8;
+}
+
+/* Success Button (Green) */
+QPushButton[class="success"] {
+    background-color: #1E8E3E;
+    color: #FFFFFF;
+    border: 1px solid #1E8E3E;
+}
+
+QPushButton[class="success"]:hover {
+    background-color: #188038;
+    border: 1px solid #188038;
+}
+
+QPushButton[class="success"]:pressed {
+    background-color: #137333;
+    border: 1px solid #137333;
+}
+
+/* Danger Button (Red/Gray for cancel) */
+QPushButton[class="danger"] {
+    background-color: #D93025;
+    color: #FFFFFF;
+    border: 1px solid #D93025;
+}
+
+QPushButton[class="danger"]:hover {
+    background-color: #C5221F;
+}
+
+
+/* ── Text Inputs (Clean Borders) ── */
+QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox {
+    background-color: #FFFFFF;
+    border: 1px solid #DADCE0;
+    border-radius: 4px;
+    padding: 6px;
+    selection-background-color: #D2E3FC;
+    selection-color: #202124;
+}
+
+QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
+    border: 2px solid #1A73E8; /* Highlight focus */
+    padding: 5px; /* Adjust padding to prevent layout shift from border change */
+}
+
+QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled {
+    background-color: #F1F3F4;
+    color: #80868B;
+}
+
+/* ── ComboBox ── */
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 20px;
+    border-left-width: 0px;
+    background-color: transparent;
+}
+QComboBox::down-arrow {
+    image: none; /* Windows default arrow is archaic; use simple text or icon if needed. For now, rely on native look which is acceptable in flat design if border is clean. */
+    border: none;
+}
+
+/* ── GroupBox (Minimal) ── */
+QGroupBox {
+    border: 1px solid #DADCE0;
+    border-radius: 6px;
+    margin-top: 24px; /* Leave space for title */
+    background-color: #FFFFFF;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    padding: 0 5px;
+    left: 10px;
+    color: #1A73E8;
+    font-weight: bold;
+    background-color: transparent; /* Let title float */
+}
+
+/* ── Tab Widget ── */
+QTabWidget::pane {
+    border: 1px solid #DADCE0;
+    border-radius: 4px;
+    background-color: #FFFFFF;
+    top: -1px; /* Overlap with tab bar */
+}
+
+QTabBar::tab {
+    background-color: #F1F3F4;
+    border: 1px solid #DADCE0;
+    border-bottom: none;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    padding: 8px 16px;
+    margin-right: 2px;
+    color: #5F6368;
+}
+
+QTabBar::tab:selected {
+    background-color: #FFFFFF;
+    color: #1A73E8;
+    font-weight: bold;
+    border-bottom: 1px solid #FFFFFF; /* Blend with pane */
+}
+
+QTabBar::tab:hover:!selected {
+    background-color: #E8EAED;
+}
+
+/* ── List Widget ── */
+QListWidget {
+    background-color: #FFFFFF;
+    border: 1px solid #DADCE0;
+    border-radius: 4px;
+}
+
+QListWidget::item {
+    padding: 8px;
+    border-bottom: 1px solid #F1F3F4;
+}
+
+QListWidget::item:selected {
+    background-color: #E8F0FE;
+    color: #1967D2;
+    border: none;
+}
+
+QListWidget::item:hover:!selected {
+    background-color: #F8F9FA;
+}
+
+/* ── ScrollBar (Slim & Modern) ── */
+QScrollBar:vertical {
+    border: none;
+    background: #F1F3F4;
+    width: 10px;
+    margin: 0px 0px 0px 0px;
+}
+QScrollBar::handle:vertical {
+    background: #BDC1C6;
+    min-height: 20px;
+    border-radius: 5px;
+}
+QScrollBar::handle:vertical:hover {
+    background: #9AA0A6;
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+
+QScrollBar:horizontal {
+    border: none;
+    background: #F1F3F4;
+    height: 10px;
+    margin: 0px 0px 0px 0px;
+}
+QScrollBar::handle:horizontal {
+    background: #BDC1C6;
+    min-width: 20px;
+    border-radius: 5px;
+}
+QScrollBar::handle:horizontal:hover {
+    background: #9AA0A6;
+}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    width: 0px;
+}
+
+/* ── ProgressBar ── */
+QProgressBar {
+    border: 1px solid #DADCE0;
+    border-radius: 4px;
+    text-align: center;
+    background-color: #FFFFFF;
+    color: #202124;
+}
+
+QProgressBar::chunk {
+    background-color: #1A73E8;
+    border-radius: 3px;
+}
+
+/* ── Splitter ── */
+QSplitter::handle {
+    background-color: #DADCE0;
+    width: 2px; /* For horizontal splitter */
+    height: 2px; /* For vertical splitter */
+}
+
+QSplitter::handle:hover {
+    background-color: #1A73E8;
+}

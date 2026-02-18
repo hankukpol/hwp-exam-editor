@@ -59,9 +59,13 @@ class PreviewWindow(QDialog):
         # 하단 제어 버튼
         btn_layout = QHBoxLayout()
         self.save_btn = QPushButton("변경사항 저장")
+        self.save_btn.setProperty("class", "success")
+        
         self.convert_btn = QPushButton("선택한 설정으로 변환 시작")
-        self.convert_btn.setObjectName("PrimaryBtn")
+        self.convert_btn.setProperty("class", "primary")
+        
         self.close_btn = QPushButton("닫기")
+        self.close_btn.setProperty("class", "danger")
         
         btn_layout.addStretch()
         btn_layout.addWidget(self.save_btn)
@@ -69,8 +73,6 @@ class PreviewWindow(QDialog):
         btn_layout.addWidget(self.close_btn)
         
         main_layout.addLayout(btn_layout)
-        
-        self.applyStyle()
 
     def bindEvents(self):
         self.list_widget.currentRowChanged.connect(self.onQuestionSelected)
@@ -162,44 +164,3 @@ class PreviewWindow(QDialog):
     def convertAndClose(self):
         if self.saveCurrentQuestion(show_message=False):
             self.accept()
-
-    def applyStyle(self):
-        style = """
-            QDialog {
-                background-color: #f5f5f5;
-            }
-            QListWidget {
-                background-color: white;
-                border: 1px solid #ddd;
-                border-radius: 4px;
-            }
-            QListWidget::item {
-                padding: 10px;
-                border-bottom: 1px solid #eee;
-            }
-            QListWidget::item:selected {
-                background-color: #e3f2fd;
-                color: #1a237e;
-            }
-            QTextEdit {
-                background-color: white;
-                border: 1px solid #ccc;
-                border-radius: 4px;
-                font-family: 'Malgun Gothic';
-                font-size: 13px;
-            }
-            QLabel {
-                font-weight: bold;
-                margin-top: 5px;
-            }
-            QPushButton {
-                padding: 8px 16px;
-                border-radius: 4px;
-                background-color: #e0e0e0;
-            }
-            #PrimaryBtn {
-                background-color: #1a237e;
-                color: white;
-            }
-        """
-        self.setStyleSheet(style)

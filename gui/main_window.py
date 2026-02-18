@@ -276,7 +276,6 @@ class DropArea(QFrame):
         self.setLayout(layout)
 
         self.setMinimumHeight(200)
-        apply_shadow(self)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -1201,6 +1200,13 @@ class MainWindow(QMainWindow):
                 if preset_file:
                     self.config_manager.load_with_preset(preset_file)
                     self.service._refresh_dependencies()
+        elif presets:
+            self.preset_combo.setCurrentIndex(0)
+            preset_file = self.preset_combo.currentData()
+            if preset_file:
+                self.config_manager.load_with_preset(preset_file)
+                self.service._refresh_dependencies()
+                self.config_manager.set_active_preset(self.preset_combo.currentText())
         self.preset_combo.blockSignals(False)
 
     def _on_preset_changed(self, index):

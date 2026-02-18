@@ -61,11 +61,12 @@ class ConfigManagerPresetMergeTestCase(unittest.TestCase):
             cm = ConfigManager(default_path=str(defaults_path), user_path=str(user_path))
             cm.PRESETS_DIR = str(presets_dir)
             merged = cm.load_with_preset("아침모의고사.json")
+            expected_template = str(cm.get_runtime_root() / "config/templates/아침모의고사 템플릿.hwp")
 
             self.assertEqual(merged["format"]["question_font_size"], 13.0)
             self.assertEqual(merged["paragraph"]["line_spacing"], 115)
-            self.assertEqual(merged["style"]["template_path"], "config/templates/아침모의고사 템플릿.hwp")
-            self.assertEqual(merged["style"]["style_map_source"], "config/templates/아침모의고사 템플릿.hwp")
+            self.assertEqual(merged["style"]["template_path"], expected_template)
+            self.assertEqual(merged["style"]["style_map_source"], expected_template)
             self.assertEqual(merged["style"]["question_style"], "문제")
             self.assertEqual(merged["style"]["passage_style"], "지문")
             self.assertEqual(
@@ -74,6 +75,59 @@ class ConfigManagerPresetMergeTestCase(unittest.TestCase):
             )
             self.assertEqual(merged["style"]["enabled"], False)
             self.assertEqual(cm.get_active_preset_file(), "아침모의고사.json")
+        finally:
+            shutil.rmtree(base, ignore_errors=True)
+
+    def test_frozen_mode_bootstraps_bundle_config_into_runtime(self) -> None:
+        base = Path(".tmp_cm_config_test") / f"cm_frozen_{uuid4().hex}"
+        bundle_root = base / "bundle"
+        runtime_root = base / "runtime"
+        try:
+            default_cfg = bundle_root / "config" / "default_config.json"
+            preset_cfg = bundle_root / "config" / "presets" / "아침모의고사.json"
+            template_hwp = bundle_root / "config" / "templates" / "아침모의고사 템플릿.hwp"
+
+            self._write_json(default_cfg, {
+                "paths": {"output_directory": ""},
+                "style": {"template_path": "config/templates/아침모의고사 템플릿.hwp"},
+            })
+            self._write_json(preset_cfg, {
+                "preset_name": "아침모의고사",
+                "style": {"template_path": "config/templates/아침모의고사 템플릿.hwp"},
+            })
+            template_hwp.parent.mkdir(parents=True, exist_ok=True)
+            template_hwp.write_bytes(b"fake_hwp_binary")
+
+            class _FrozenConfigManager(ConfigManager):
+                @staticmethod
+                def _is_frozen() -> bool:
+                    return True
+
+                @classmethod
+                def _detect_bundle_root(cls) -> Path:
+                    return bundle_root
+
+                @classmethod
+                def _detect_runtime_root(cls) -> Path:
+                    return runtime_root
+
+            cm = _FrozenConfigManager()
+
+            self.assertTrue((runtime_root / "config" / "default_config.json").exists())
+            self.assertTrue((runtime_root / "config" / "presets" / "아침모의고사.json").exists())
+            self.assertTrue((runtime_root / "config" / "templates" / "아침모의고사 템플릿.hwp").exists())
+            self.assertEqual(
+                cm.default_path,
+                runtime_root / "config" / "default_config.json",
+            )
+            self.assertEqual(
+                cm.get_presets_dir(),
+                runtime_root / "config" / "presets",
+            )
+            self.assertEqual(
+                cm.get_templates_dir(),
+                runtime_root / "config" / "templates",
+            )
         finally:
             shutil.rmtree(base, ignore_errors=True)
 

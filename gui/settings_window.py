@@ -17,7 +17,7 @@ class SettingsWindow(QDialog):
         super().__init__(parent)
         self.config_manager = config_manager
         self.setWindowTitle("설정")
-        self.resize(620, 760)
+        self.resize(660, 800)
         self.initUI()
         self.loadConfig()
 
@@ -191,11 +191,15 @@ class SettingsWindow(QDialog):
         btn_layout = QHBoxLayout()
         self.export_btn = QPushButton("설정 내보내기")
         self.import_btn = QPushButton("설정 가져오기")
+        
         self.save_as_preset_btn = QPushButton("프리셋으로 저장")
-        self.save_as_preset_btn.setStyleSheet("background-color: #2e7d32; color: white;")
+        self.save_as_preset_btn.setProperty("class", "success")
+        
         self.save_btn = QPushButton("저장")
-        self.save_btn.setStyleSheet("background-color: #1a237e; color: white;")
+        self.save_btn.setProperty("class", "primary")
+        
         self.cancel_btn = QPushButton("취소")
+        
         btn_layout.addWidget(self.export_btn)
         btn_layout.addWidget(self.import_btn)
         btn_layout.addWidget(self.save_as_preset_btn)
@@ -422,6 +426,16 @@ class SettingsWindow(QDialog):
             return
 
         desc, _ = QInputDialog.getText(self, "프리셋 설명", "프리셋 설명을 입력하세요 (선택):")
+        template_path_raw = self.style_template_edit.text().strip()
+        template_path_value = template_path_raw
+        if template_path_raw:
+            try:
+                runtime_root = self.config_manager.get_runtime_root().resolve()
+                template_abs = Path(template_path_raw).expanduser().resolve()
+                rel = template_abs.relative_to(runtime_root)
+                template_path_value = str(rel).replace("\\", "/")
+            except Exception:
+                template_path_value = template_path_raw
 
         preset = {
             "preset_name": name.strip(),
@@ -440,7 +454,7 @@ class SettingsWindow(QDialog):
                 "indent_value": self.indent_spin.value(),
             },
             "style": {
-                "template_path": self.style_template_edit.text().strip(),
+                "template_path": template_path_value,
                 "question_style": self.question_style_edit.text().strip() or "문제",
                 "passage_style": self.passage_style_edit.text().strip() or "지문",
             },
@@ -448,7 +462,7 @@ class SettingsWindow(QDialog):
 
         # 안전한 파일명 생성
         safe_name = re.sub(r'[\\/:*?"<>|]+', '_', name.strip())
-        preset_dir = Path("config/presets")
+        preset_dir = self.config_manager.get_presets_dir()
         preset_dir.mkdir(parents=True, exist_ok=True)
         preset_path = preset_dir / f"{safe_name}.json"
 
