@@ -97,6 +97,11 @@ class ConfigManager:
             return ""
         path = Path(text).expanduser()
         if path.is_absolute():
+            if path.exists():
+                return str(path)
+            recovered = self._recover_missing_absolute_path(path)
+            if recovered is not None:
+                return str(recovered)
             return str(path)
         runtime_candidate = self._runtime_root / path
         if runtime_candidate.exists() or self._is_frozen():
@@ -105,6 +110,52 @@ class ConfigManager:
         if bundle_candidate.exists():
             return str(bundle_candidate)
         return str((Path.cwd() / path).resolve())
+
+    def _recover_missing_absolute_path(self, missing_path: Path) -> Path | None:
+        filename = missing_path.name
+        if not filename:
+            return None
+
+        template_roots = [
+            self._runtime_root / "config" / "templates",
+            self._bundle_root / "config" / "templates",
+            Path.cwd() / "config" / "templates",
+        ]
+
+        for root in template_roots:
+            if not root.exists():
+                continue
+            direct = (root / filename)
+            if direct.exists():
+                return direct
+
+        parts = list(missing_path.parts)
+        suffix_after_templates: Path | None = None
+        for idx in range(len(parts) - 1):
+            if parts[idx].lower() == "config" and parts[idx + 1].lower() == "templates":
+                tail = parts[idx + 2:]
+                if tail:
+                    suffix_after_templates = Path(*tail)
+                break
+
+        if suffix_after_templates is not None:
+            for root in template_roots:
+                if not root.exists():
+                    continue
+                candidate = root / suffix_after_templates
+                if candidate.exists():
+                    return candidate
+
+        for root in template_roots:
+            if not root.exists():
+                continue
+            try:
+                matches = list(root.rglob(filename))
+            except Exception:
+                matches = []
+            if matches:
+                return matches[0]
+        return None
 
     def _normalize_style_paths(self, config: dict[str, Any]) -> dict[str, Any]:
         style = config.get("style")

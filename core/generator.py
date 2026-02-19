@@ -817,19 +817,43 @@ class OutputGenerator:
             )
 
         if question.choices:
-            if not question.sub_items or self.formatter.choice_style != self.formatter.sub_items_style:
-                self._heartbeat(f"문제 {question.number}: 선지 스타일")
-                self.formatter.apply_choice_format(hwp)
-            for choice_text in self._build_choice_lines(question.choices):
-                self._insert_text(hwp, f"{choice_text}\r\n")
+            render_choices_as_table = self._should_render_choices_as_table(question.choices)
+            if question.sub_items and question.has_table:
+                render_choices_as_table = False
+            if render_choices_as_table:
+                self._heartbeat(f"문제 {question.number}: 선지 표 블록")
+                choice_lines = [
+                    self._strip_choice_noise_suffix(choice)
+                    for choice in question.choices
+                    if (choice or "").strip()
+                ]
+                self._insert_sub_items_block(
+                    hwp,
+                    choice_lines,
+                    question.number,
+                    prefer_table=True,
+                    has_following_choices=False,
+                    style_applier=self.formatter.apply_choice_format,
+                )
+            else:
+                if not question.sub_items or self.formatter.choice_style != self.formatter.sub_items_style:
+                    self._heartbeat(f"문제 {question.number}: 선지 스타일")
+                    self.formatter.apply_choice_format(hwp)
+                for choice_text in self._build_choice_lines(question.choices):
+                    self._insert_text(hwp, f"{choice_text}\r\n")
 
         self._insert_text(hwp, "\r\n")
         self._heartbeat(f"문제 {question.number}: 완료")
 
     def _insert_explanation_block(self, hwp, question: ExamQuestion) -> None:
         answer = question.answer or "-"
+        answer_line = (question.answer_line or "").strip()
+        rendered_answer = answer_line if "정답" in answer_line else ""
+        if not rendered_answer:
+            rendered_answer = f"정답 {answer}"
+
         self.formatter.apply_question_format(hwp, emphasize=False)
-        self._insert_text(hwp, f"{question.number}. 정답 {answer}\r\n")
+        self._insert_text(hwp, f"{question.number}. {rendered_answer}\r\n")
 
         if question.explanation:
             self.formatter.apply_explanation_format(hwp)
@@ -859,11 +883,30 @@ class OutputGenerator:
         question_number: int | None = None,
         prefer_table: bool = False,
         has_following_choices: bool = False,
+        style_applier: Callable[[Any], None] | None = None,
     ) -> None:
+        apply_line_style = style_applier or self.formatter.apply_sub_items_format
+
+        if prefer_table:
+            blocks = self._split_line_blocks(sub_items)
+            if len(blocks) > 1:
+                for idx, block in enumerate(blocks):
+                    has_more_blocks = idx + 1 < len(blocks)
+                    self._insert_sub_items_block(
+                        hwp,
+                        block,
+                        question_number=question_number,
+                        prefer_table=True,
+                        has_following_choices=has_following_choices if not has_more_blocks else True,
+                        style_applier=apply_line_style,
+                    )
+                return
+            sub_items = blocks[0] if blocks else []
+
         if not self._should_use_sub_items_table(sub_items, prefer_table=prefer_table):
             if question_number is not None and self._use_sub_items_table and len(sub_items) >= 2:
                 self._heartbeat(f"문제 {question_number}: 소문항 표 생략(길이/복잡도)")
-            self.formatter.apply_sub_items_format(hwp)
+            apply_line_style(hwp)
             for item in sub_items:
                 self._insert_text(hwp, f"{item}\r\n")
             return
@@ -879,8 +922,8 @@ class OutputGenerator:
 
             self._heartbeat("소문항: 스타일 적용")
             self._heartbeat("소문항: 텍스트 입력")
-            self._insert_sub_items_lines_in_table(hwp, sub_items)
-            self._apply_sub_items_format_to_current_table_cell(hwp)
+            self._insert_sub_items_lines_in_table(hwp, sub_items, style_applier=apply_line_style)
+            self._apply_sub_items_format_to_current_table_cell(hwp, style_applier=apply_line_style)
             self._set_current_table_treat_as_char(hwp)
 
             # CloseEx is the reliable way to exit table editing in HWP 2014.
@@ -895,27 +938,38 @@ class OutputGenerator:
             self._heartbeat(f"소문항: 표 실패({type(exc).__name__}), 일반 입력 대체")
             self._leave_table_context(hwp)
             self._force_table_context_cleanup(hwp)
-            self.formatter.apply_sub_items_format(hwp)
+            apply_line_style(hwp)
             for item in sub_items:
                 self._insert_text(hwp, f"{item}\r\n")
 
-    def _insert_sub_items_lines_in_table(self, hwp, sub_items: list[str]) -> None:
+    def _insert_sub_items_lines_in_table(
+        self,
+        hwp,
+        sub_items: list[str],
+        style_applier: Callable[[Any], None] | None = None,
+    ) -> None:
+        apply_line_style = style_applier or self.formatter.apply_sub_items_format
         for index, item in enumerate(sub_items):
             # Table cell paragraphs can revert to the cell-default para shape
             # on each newline, so apply style per line.
-            self.formatter.apply_sub_items_format(hwp)
+            apply_line_style(hwp)
             self._insert_text(hwp, item)
             if index + 1 < len(sub_items):
                 self._insert_text(hwp, "\r\n")
 
-    def _apply_sub_items_format_to_current_table_cell(self, hwp) -> None:
+    def _apply_sub_items_format_to_current_table_cell(
+        self,
+        hwp,
+        style_applier: Callable[[Any], None] | None = None,
+    ) -> None:
+        apply_line_style = style_applier or self.formatter.apply_sub_items_format
         # After text insertion, normalize the entire current cell once more.
         # This forces a consistent para shape (line spacing/indent) across all
         # lines in the table cell.
         try:
             hwp.HAction.Run("TableCellBlock")
             hwp.HAction.Run("TableCellBlockExtend")
-            self.formatter.apply_sub_items_format(hwp)
+            apply_line_style(hwp)
         except Exception:
             return
         finally:
@@ -924,10 +978,28 @@ class OutputGenerator:
             except Exception:
                 pass
 
+    @staticmethod
+    def _split_line_blocks(lines: list[str]) -> list[list[str]]:
+        blocks: list[list[str]] = []
+        current: list[str] = []
+        for line in lines:
+            text = (line or "").strip()
+            if not text:
+                if current:
+                    blocks.append(current)
+                    current = []
+                continue
+            current.append(text)
+        if current:
+            blocks.append(current)
+        return blocks
+
     def _normalize_inline_choice_spacing(self, choice: str) -> str:
         text = (choice or "").strip()
         if not text:
             return ""
+        if "\t" in text:
+            return self._strip_choice_noise_suffix(text)
         marker_pattern = re.compile(r"[①②③④⑤]")
         matches = list(marker_pattern.finditer(text))
         if len(matches) < 2:
@@ -949,7 +1021,12 @@ class OutputGenerator:
 
     @staticmethod
     def _strip_choice_noise_suffix(text: str) -> str:
-        normalized = re.sub(r"\s+", " ", (text or "").strip())
+        raw = (text or "").strip()
+        if "\t" in raw:
+            chunks = [re.sub(r"[ ]+", " ", chunk).strip() for chunk in raw.split("\t")]
+            normalized = "\t".join(chunks)
+        else:
+            normalized = re.sub(r"\s+", " ", raw)
         if not normalized:
             return ""
 
@@ -988,6 +1065,8 @@ class OutputGenerator:
         normalized: list[str] = []
         payload_lengths: list[int] = []
         for line in lines:
+            if "\t" in line:
+                return False
             text = re.sub(r"\s+", " ", (line or "").strip())
             if not text:
                 return False
@@ -1007,6 +1086,29 @@ class OutputGenerator:
             return False
         total = sum(len(text) for text in normalized) + (len(normalized) - 1) * 9
         return total <= 110
+
+    def _should_render_choices_as_table(self, choices: list[str]) -> bool:
+        if not self._use_sub_items_table:
+            return False
+        if len(choices) < 2:
+            return False
+
+        table_like_count = 0
+        for choice in choices:
+            text = (choice or "").strip()
+            if not text:
+                continue
+            if self._is_table_like_choice_line(text):
+                table_like_count += 1
+        return table_like_count >= 2
+
+    @staticmethod
+    def _is_table_like_choice_line(text: str) -> bool:
+        if "\t" in text:
+            return True
+        if "|" in text:
+            return True
+        return False
 
     def _should_use_sub_items_table(self, sub_items: list[str], prefer_table: bool = False) -> bool:
         if not self._use_sub_items_table:
@@ -1485,8 +1587,12 @@ class OutputGenerator:
             file.write("\n")
             for question in document.questions:
                 answer = question.answer or "-"
+                answer_line = (question.answer_line or "").strip()
+                rendered_answer = answer_line if "정답" in answer_line else ""
+                if not rendered_answer:
+                    rendered_answer = f"정답 {answer}"
                 explanation = question.explanation or ""
-                file.write(f"{question.number:02d}. 정답 {answer}\n")
+                file.write(f"{question.number:02d}. {rendered_answer}\n")
                 if explanation:
                     file.write(f"{explanation}\n")
                 file.write("\n")

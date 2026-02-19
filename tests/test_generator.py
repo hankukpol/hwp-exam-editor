@@ -1,6 +1,7 @@
 import unittest
 
 from core.generator import OutputGenerator
+from core.models import ExamQuestion
 
 
 def _make_generator(sub_items_table: bool = True) -> OutputGenerator:
@@ -46,6 +47,42 @@ class GeneratorSubItemsTablePolicyTestCase(unittest.TestCase):
             "item_b test",
         ]
         self.assertFalse(generator._should_use_sub_items_table(sub_items, prefer_table=True))
+
+    def test_inline_choice_matrix_is_not_detected_as_table(self) -> None:
+        generator = _make_generator(True)
+        choices = [
+            "① ㉠ (X), ㉡ (O), ㉢ (X), ㉣ (O)",
+            "② ㉠ (O), ㉡ (X), ㉢ (O), ㉣ (X)",
+            "③ ㉠ (X), ㉡ (X), ㉢ (O), ㉣ (O)",
+        ]
+        self.assertFalse(generator._should_render_choices_as_table(choices))
+
+    def test_tab_separated_choice_matrix_is_detected_as_table(self) -> None:
+        generator = _make_generator(True)
+        choices = [
+            "①\t㉠ (X)\t㉡ (O)\t㉢ (X)\t㉣ (O)",
+            "②\t㉠ (O)\t㉡ (X)\t㉢ (O)\t㉣ (X)",
+            "③\t㉠ (X)\t㉡ (X)\t㉢ (O)\t㉣ (O)",
+        ]
+        self.assertTrue(generator._should_render_choices_as_table(choices))
+
+    def test_plain_choices_are_not_detected_as_table(self) -> None:
+        generator = _make_generator(True)
+        choices = [
+            "① 첫 번째 보기",
+            "② 두 번째 보기",
+            "③ 세 번째 보기",
+            "④ 네 번째 보기",
+        ]
+        self.assertFalse(generator._should_render_choices_as_table(choices))
+
+    def test_split_line_blocks_for_multiple_tables(self) -> None:
+        generator = _make_generator(True)
+        lines = ["<사례>", "사례 본문", "", "<보기>", "㉠ 설명", "㉡ 설명"]
+        self.assertEqual(
+            generator._split_line_blocks(lines),
+            [["<사례>", "사례 본문"], ["<보기>", "㉠ 설명", "㉡ 설명"]],
+        )
 
     def test_prefer_table_fallback_does_not_insert_box_characters(self) -> None:
         generator = _make_generator(True)
@@ -148,6 +185,52 @@ class GeneratorSubItemsTablePolicyTestCase(unittest.TestCase):
         self.assertIn("style", calls)
         self.assertIn("Cancel", calls)
 
+    def test_choice_table_is_suppressed_when_sub_item_table_exists(self) -> None:
+        generator = _make_generator(True)
+        generator.formatter.apply_question_format = lambda hwp, emphasize=False: None
+        generator.formatter.apply_question_inline_char = lambda hwp, emphasize=False: None
+        generator.formatter.apply_choice_format = lambda hwp: None
+        generator._insert_text = lambda hwp, text: None
+        generator._insert_question_text_with_emphasis = lambda hwp, text, keyword: None
+        generator._leave_table_context = lambda hwp: True
+
+        calls: list[dict[str, object]] = []
+
+        def _capture(
+            hwp,
+            sub_items,
+            question_number=None,
+            prefer_table=False,
+            has_following_choices=False,
+            style_applier=None,
+        ):
+            calls.append(
+                {
+                    "sub_items": list(sub_items),
+                    "prefer_table": bool(prefer_table),
+                    "has_following_choices": bool(has_following_choices),
+                }
+            )
+
+        generator._insert_sub_items_block = _capture
+
+        question = ExamQuestion(
+            number=1,
+            question_text="질문",
+            sub_items=["(가) 설명", "(나) 설명"],
+            has_table=True,
+            choices=[
+                "①\t㉠ (O)\t㉡ (O)\t㉢ (O)\t㉣ (O)",
+                "②\t㉠ (O)\t㉡ (X)\t㉢ (O)\t㉣ (X)",
+            ],
+        )
+
+        generator._insert_question_block(object(), question)
+
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(calls[0]["prefer_table"])
+        self.assertTrue(calls[0]["has_following_choices"])
+
     def test_inline_choice_spacing_is_fixed_to_nine_spaces(self) -> None:
         generator = _make_generator(True)
         source = "\u2460 1개  \u2461 2개 \u2462 3개   \u2463 4개"
@@ -218,6 +301,24 @@ class GeneratorSubItemsTablePolicyTestCase(unittest.TestCase):
         source = "\u2460 0\uac1c \u4546 \u2461 1\uac1c"
         expected = "\u2460 0\uac1c" + (" " * 9) + "\u2461 1\uac1c"
         self.assertEqual(generator._normalize_inline_choice_spacing(source), expected)
+
+    def test_insert_explanation_block_uses_original_answer_line(self) -> None:
+        generator = _make_generator(True)
+        generator.formatter.apply_question_format = lambda hwp, emphasize=False: None
+        generator.formatter.apply_explanation_format = lambda hwp: None
+
+        inserted: list[str] = []
+        generator._insert_text = lambda hwp, text: inserted.append(text)
+
+        question = ExamQuestion(
+            number=1,
+            question_text="문제",
+            answer="②",
+            answer_line="[정답] (②)",
+            explanation=None,
+        )
+        generator._insert_explanation_block(object(), question)
+        self.assertEqual(inserted[0], "1. [정답] (②)\r\n")
 
 
 if __name__ == "__main__":

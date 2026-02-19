@@ -15,7 +15,7 @@
     "indent_value": 12.0
   },
   "style": {
-    "template_path": "D:/앱 프로그램/아침모의고사 자동편집 프로그램/config/templates/정기모의고사 템플릿.hwp",
+    "template_path": "config/templates/정기모의고사 템플릿.hwp",
     "question_style": "문제",
     "passage_style": "지문"
   }

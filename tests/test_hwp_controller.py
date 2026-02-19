@@ -15,6 +15,10 @@ class HwpControllerLineCleanupTestCase(unittest.TestCase):
     def test_clean_line_keeps_single_hanja_marker(self) -> None:
         self.assertEqual(self.controller._clean_line("甲"), "甲")
 
+    def test_clean_line_preserves_tab_separators_for_table_rows(self) -> None:
+        line = "①\t㉠ (X)\t㉡ (O)"
+        self.assertEqual(self.controller._clean_line(line), line)
+
 
 if __name__ == "__main__":
     unittest.main()

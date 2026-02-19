@@ -150,7 +150,8 @@ class HwpController:
 
     def _clean_line(self, line: str) -> str:
         text = line.replace("\x00", "")
-        text = re.sub(r"[\u0001-\u001f]", " ", text)
+        # Keep tab separators so table-like rows are not flattened.
+        text = re.sub(r"[\u0001-\u0008\u000B-\u001F]", " ", text)
         text = text.replace("⋅", "·")
         text = text.replace("･", "·")
 
@@ -158,7 +159,12 @@ class HwpController:
         text = re.sub(r"[\u0100-\u024F\u0300-\u036F\u0400-\u052F\u0590-\u05FF]", "", text)
         text = re.sub(r"[\uFFF0-\uFFFF]", "", text)
 
-        text = re.sub(r"\s+", " ", text).strip()
+        if "\t" in text:
+            chunks = [re.sub(r"[ ]+", " ", chunk).strip() for chunk in text.split("\t")]
+            text = "\t".join(chunks)
+            text = re.sub(r"\t{2,}", "\t", text).strip()
+        else:
+            text = re.sub(r"\s+", " ", text).strip()
         if not text:
             return ""
 

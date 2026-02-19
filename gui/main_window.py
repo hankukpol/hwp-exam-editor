@@ -40,6 +40,7 @@ def _document_to_payload(document: ExamDocument) -> dict:
                 "has_table": q.has_table,
                 "has_negative": q.has_negative,
                 "negative_keyword": q.negative_keyword,
+                "answer_line": q.answer_line,
                 "answer": q.answer,
                 "explanation": q.explanation,
             }

@@ -8,13 +8,18 @@ from core.config_manager import ConfigManager
 
 
 class ConfigManagerPresetMergeTestCase(unittest.TestCase):
+    def _make_base_dir(self, prefix: str) -> Path:
+        base = Path(".tmp_cm_runtime_local") / f"{prefix}_{uuid4().hex}"
+        base.mkdir(parents=True, exist_ok=True)
+        return base
+
     def _write_json(self, path: Path, payload: dict) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", encoding="utf-8") as file:
             json.dump(payload, file, ensure_ascii=False, indent=2)
 
     def test_load_with_preset_keeps_preset_template_and_user_module(self) -> None:
-        base = Path(".tmp_cm_config_test") / f"cm_preset_{uuid4().hex}"
+        base = self._make_base_dir("cm_preset")
         base.mkdir(parents=True, exist_ok=True)
         try:
             defaults_path = base / "default.json"
@@ -59,7 +64,7 @@ class ConfigManagerPresetMergeTestCase(unittest.TestCase):
             })
 
             cm = ConfigManager(default_path=str(defaults_path), user_path=str(user_path))
-            cm.PRESETS_DIR = str(presets_dir)
+            cm.PRESETS_DIR = str(presets_dir.resolve())
             merged = cm.load_with_preset("아침모의고사.json")
             expected_template = str(cm.get_runtime_root() / "config/templates/아침모의고사 템플릿.hwp")
 
@@ -79,7 +84,7 @@ class ConfigManagerPresetMergeTestCase(unittest.TestCase):
             shutil.rmtree(base, ignore_errors=True)
 
     def test_frozen_mode_bootstraps_bundle_config_into_runtime(self) -> None:
-        base = Path(".tmp_cm_config_test") / f"cm_frozen_{uuid4().hex}"
+        base = self._make_base_dir("cm_frozen")
         bundle_root = base / "bundle"
         runtime_root = base / "runtime"
         try:
@@ -128,6 +133,62 @@ class ConfigManagerPresetMergeTestCase(unittest.TestCase):
                 cm.get_templates_dir(),
                 runtime_root / "config" / "templates",
             )
+        finally:
+            shutil.rmtree(base, ignore_errors=True)
+
+    def test_load_with_preset_recovers_stale_absolute_template_path(self) -> None:
+        base = self._make_base_dir("cm_stale_preset")
+        try:
+            defaults_path = base / "default.json"
+            user_path = base / "user.json"
+            presets_dir = base / "presets"
+            preset_file = presets_dir / "아침모의고사.json"
+            templates_dir = base / "config" / "templates"
+            template_path = templates_dir / "아침모의고사 템플릿.hwp"
+            template_path.parent.mkdir(parents=True, exist_ok=True)
+            template_path.write_bytes(b"fake_hwp_binary")
+
+            stale_absolute = "D:/앱 프로그램/아침모의고사 자동편집 프로그램/config/templates/아침모의고사 템플릿.hwp"
+
+            self._write_json(defaults_path, {
+                "style": {"enabled": True},
+            })
+            self._write_json(preset_file, {
+                "preset_name": "아침모의고사",
+                "style": {
+                    "template_path": stale_absolute,
+                    "style_map_source": stale_absolute,
+                    "question_style": "문제",
+                    "passage_style": "지문",
+                },
+            })
+            self._write_json(user_path, {
+                "style": {"enabled": True},
+            })
+
+            class _PortableConfigManager(ConfigManager):
+                @staticmethod
+                def _is_frozen() -> bool:
+                    return False
+
+                @classmethod
+                def _detect_bundle_root(cls) -> Path:
+                    return base
+
+                @classmethod
+                def _detect_runtime_root(cls) -> Path:
+                    return base
+
+            cm = _PortableConfigManager(
+                default_path=str(defaults_path.resolve()),
+                user_path=str(user_path.resolve()),
+            )
+            cm.PRESETS_DIR = str(presets_dir.resolve())
+            merged = cm.load_with_preset("아침모의고사.json")
+
+            expected = str(template_path)
+            self.assertEqual(merged["style"]["template_path"], expected)
+            self.assertEqual(merged["style"]["style_map_source"], expected)
         finally:
             shutil.rmtree(base, ignore_errors=True)
 

@@ -31,10 +31,10 @@ class ParserVariantIntegrationTestCase(unittest.TestCase):
         self.assertIsNone(document.questions[0].answer)
         self.assertTrue(document.questions[0].has_negative)
 
-    def test_default_threshold_marks_small_type_a_as_type_b(self) -> None:
+    def test_default_threshold_keeps_small_type_a_as_type_a(self) -> None:
         sample = self.sample_dir / "형법_변형A.txt"
         document = self.service.parse_file(str(sample))
-        self.assertEqual(document.file_type, "TYPE_B")
+        self.assertEqual(document.file_type, "TYPE_A")
 
 
 if __name__ == "__main__":

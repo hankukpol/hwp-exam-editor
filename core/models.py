@@ -13,6 +13,7 @@ class ExamQuestion:
     has_table: bool = False
     has_negative: bool = False
     negative_keyword: str = ""
+    answer_line: Optional[str] = None
     answer: Optional[str] = None
     explanation: Optional[str] = None
 

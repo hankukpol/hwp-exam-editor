@@ -1,3 +1,5 @@
+import re
+
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QListWidget, 
                              QListWidgetItem, QTextEdit, QLabel, QPushButton, 
                              QSplitter, QFrame, QMessageBox)
@@ -112,7 +114,7 @@ class PreviewWindow(QDialog):
             body_parts.append("\n".join(question.choices))
 
         self.question_edit.setPlainText("\n".join(part for part in body_parts if part))
-        self.answer_edit.setPlainText(question.answer or "")
+        self.answer_edit.setPlainText(question.answer_line or question.answer or "")
         self.explanation_edit.setPlainText(question.explanation or "")
 
     def saveCurrentQuestion(self, show_message: bool = True) -> bool:
@@ -152,7 +154,20 @@ class PreviewWindow(QDialog):
         question.question_text = question_text
         question.choices = choices
         question.sub_items = sub_items
-        question.answer = self.answer_edit.toPlainText().strip() or None
+        answer_text = self.answer_edit.toPlainText().strip()
+        answer_symbol = None
+        circle_match = re.search(r"[①②③④⑤]", answer_text)
+        if circle_match:
+            answer_symbol = circle_match.group(0)
+        else:
+            digit_match = re.search(r"(?<!\d)([1-5])(?!\d)", answer_text)
+            if digit_match:
+                answer_symbol = {"1": "①", "2": "②", "3": "③", "4": "④", "5": "⑤"}[digit_match.group(1)]
+        question.answer = answer_symbol or (answer_text or None)
+        if answer_text:
+            question.answer_line = answer_text if "정답" in answer_text else f"정답 {answer_text}"
+        else:
+            question.answer_line = None
         question.explanation = self.explanation_edit.toPlainText().strip() or None
 
         self.loadQuestions()

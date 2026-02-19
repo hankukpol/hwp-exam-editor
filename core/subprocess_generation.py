@@ -113,6 +113,7 @@ def _payload_to_document(payload: dict[str, Any]) -> ExamDocument:
                 has_table=bool(item.get("has_table", False)),
                 has_negative=bool(item.get("has_negative", False)),
                 negative_keyword=str(item.get("negative_keyword", "")),
+                answer_line=item.get("answer_line"),
                 answer=item.get("answer"),
                 explanation=item.get("explanation"),
             )
